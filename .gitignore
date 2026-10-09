@@ -1,0 +1,51 @@
+# ============================================================
+# Farmácia Bem Estar — .gitignore (raiz do projeto)
+# ============================================================
+
+# --- Segredos / variáveis de ambiente ---
+.env
+.env.*
+!.env.example
+
+# --- Banco de dados SQLite e arquivos auxiliares ---
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- Backups do banco e exports de dados ---
+backend/backups/
+backend/*_backup.json
+
+# --- Uploads (fotos de produtos e planilhas enviadas) ---
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# --- Dependências ---
+node_modules/
+
+# --- Builds e caches ---
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# --- Logs ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Sistema operacional / editores ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.sw?

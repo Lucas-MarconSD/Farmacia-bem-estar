@@ -1,0 +1,223 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background-color: var(--color-primary);
+  color: var(--color-white);
+  box-shadow: var(--shadow-md);
+}
+
+.top-bar {
+  background-color: var(--color-primary-dark);
+  color: var(--color-white);
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.header-main {
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--color-primary);
+}
+
+.logo-icon {
+  background-color: var(--color-primary);
+  color: var(--color-white);
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.logo-text-top {
+  font-weight: 800;
+  font-size: 1.25rem;
+  color: var(--color-primary-dark);
+}
+
+.logo-text-bottom {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--color-primary);
+}
+
+.search-bar {
+  flex: 1;
+  max-width: 500px;
+  position: relative;
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .search-bar {
+    display: block;
+  }
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 20px;
+  padding-right: 48px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--color-white);
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.search-input:focus {
+  border-color: var(--color-white);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.search-button {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.8);
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: color var(--transition-fast);
+  position: relative;
+}
+
+.action-btn:hover {
+  color: var(--color-white);
+}
+
+.cart-badge {
+  position: absolute;
+  top: -6px;
+  right: 0;
+  background-color: var(--color-accent);
+  color: var(--color-white);
+  font-size: 0.65rem;
+  font-weight: 700;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-nav {
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-white);
+  display: none;
+}
+
+.header-nav.mobile-open {
+  display: block;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  box-shadow: var(--shadow-md);
+}
+
+@media (min-width: 768px) {
+  .header-nav {
+    display: block;
+  }
+  .header-nav.mobile-open {
+    position: static;
+    box-shadow: none;
+  }
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 12px 24px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+  .nav-list {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .nav-item {
+    border-bottom: none;
+    padding: 0;
+  }
+}
+
+.nav-item {
+  display: block;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: color var(--transition-fast);
+}
+
+.nav-item:hover {
+  color: var(--color-primary);
+}
+
+.nav-item.highlight {
+  color: var(--color-accent);
+}
+
+.mobile-search {
+  padding: 12px 24px;
+  display: block;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@media (min-width: 768px) {
+  .mobile-search {
+    display: none;
+  }
+  .mobile-menu-btn {
+    display: none;
+  }
+}
