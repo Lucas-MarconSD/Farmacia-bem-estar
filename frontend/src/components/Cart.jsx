@@ -15,7 +15,7 @@ export default function Cart({ isOpen, onClose, cartItems, onUpdateQuantity, onR
   const handleCheckout = () => {
     if (cartItems.length === 0) return;
 
-    let message = "Olá, Farmácia Bem Estar! Gostaria de finalizar meu pedido:\n\n";
+    let message = "Olá, Farmácia Bem Star! Gostaria de finalizar meu pedido:\n\n";
     
     cartItems.forEach(item => {
       message += `${item.quantity}x ${item.name} - R$ ${formatCurrency(item.price)}\n`;

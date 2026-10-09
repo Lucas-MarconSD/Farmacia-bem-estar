@@ -48,7 +48,7 @@ export default function Footer() {
         </div>
 
         <div className="footer-bottom">
-          <p>© 2025 Farmácia Bem Estar. Todos os direitos reservados.</p>
+          <p>© 2025 Farmácia Bem Star. Todos os direitos reservados.</p>
           <button className="whatsapp-btn" onClick={() => window.open('https://wa.me/5521996288008', '_blank')}>
             <MessageCircle size={20} />
             Conversar no WhatsApp

@@ -10,7 +10,7 @@ export default function AboutUs() {
           <div className="about-text">
             <h2 className="section-title">Quem Somos</h2>
             <p>
-              Na <strong>Farmácia Bem Estar</strong>, nossa missão é cuidar de você e da sua família, oferecendo praticidade, atenção e produtos de qualidade para o dia a dia.
+              Na <strong>Farmácia Bem Star</strong>, nossa missão é cuidar de você e da sua família, oferecendo praticidade, atenção e produtos de qualidade para o dia a dia.
             </p>
             <p>
               Acreditamos que cuidar da saúde e do bem-estar deve ser simples e acessível. Por isso, buscamos proporcionar uma experiência de compra prática, com variedade de produtos, atendimento atencioso e a comodidade de receber suas compras em casa.
@@ -27,7 +27,7 @@ export default function AboutUs() {
               </div>
               <div className="feature-item">
                 <Heart className="feature-icon" size={24} color="var(--color-primary)" />
-                <span>Farmácia Bem Estar. Cuidando de você em cada detalhe!</span>
+                <span>Farmácia Bem Star. Cuidando de você em cada detalhe!</span>
               </div>
             </div>
           </div>
@@ -40,7 +40,7 @@ export default function AboutUs() {
                allowFullScreen="" 
                loading="lazy" 
                referrerPolicy="no-referrer-when-downgrade"
-               title="Localização da Farmácia Bem Estar no Google Maps"
+               title="Localização da Farmácia Bem Star no Google Maps"
              ></iframe>
           </div>
         </div>

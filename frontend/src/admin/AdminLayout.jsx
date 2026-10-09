@@ -32,7 +32,7 @@ export default function AdminLayout() {
     <div className="admin-layout">
       <aside className="admin-sidebar">
         <div className="admin-logo">
-          <h2>Bem Estar Admin</h2>
+          <h2>Bem Star Admin</h2>
         </div>
         <nav className="admin-nav">
           {menu.map(item => {

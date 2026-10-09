@@ -52,7 +52,7 @@ export default function Header({ cartCount, onOpenCart, searchTerm, setSearchTer
           >
             <Menu size={24} />
           </button>
-          <a href="/" className="logo" aria-label="Farmácia Bem Estar - Página Inicial" style={{ textDecoration: 'none' }}>
+          <a href="/" className="logo" aria-label="Farmácia Bem Star - Página Inicial" style={{ textDecoration: 'none' }}>
             <CustomLogo />
           </a>
         </div>

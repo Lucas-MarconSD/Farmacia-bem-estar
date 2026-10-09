@@ -1,7 +1,7 @@
 import React from 'react';
 
 const CustomLogo = ({ width = 200, height = 90 }) => (
-  <svg width={width} height={height} viewBox="0 0 200 115" xmlns="http://www.w3.org/2000/svg" className="header-custom-logo">
+  <svg width={width} height={height} viewBox="0 0 220 115" xmlns="http://www.w3.org/2000/svg" className="header-custom-logo">
     <defs>
       <style>
         {`
