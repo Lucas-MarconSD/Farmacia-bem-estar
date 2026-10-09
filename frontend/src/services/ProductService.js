@@ -1,4 +1,4 @@
-import { API_URL } from '../config/constants';
+import { supabase } from '../config/supabaseClient';
 
 export class ProductService {
   static async getProducts(page = 1, limit = 20) {
@@ -7,8 +7,13 @@ export class ProductService {
 
   static async getCategories() {
     try {
-      const response = await fetch(`${API_URL}/categories`);
-      const data = await response.json();
+      const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('active', true)
+        .order('name');
+        
+      if (error) throw error;
       
       const iconMap = {
         'medicamentos': 'Pill',
@@ -30,16 +35,24 @@ export class ProductService {
 
   static async filterProducts(searchTerm, categorySlug, page = 1, limit = 20) {
     try {
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-      if (categorySlug && categorySlug !== 'todos') params.append('category', categorySlug);
-      params.append('page', page);
-      params.append('limit', limit);
-      
-      const response = await fetch(`${API_URL}/products?${params.toString()}`);
-      const result = await response.json();
+      let query = supabase.from('products').select('*, categories!inner(slug)', { count: 'exact' });
 
-      const data = result.data || result; // Fallback to array if API didn't return object
+      if (searchTerm) {
+        query = query.ilike('name', `%${searchTerm}%`);
+      }
+
+      if (categorySlug && categorySlug !== 'todos') {
+        query = query.eq('categories.slug', categorySlug);
+      }
+
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+
+      query = query.order('name', { ascending: true }).range(from, to);
+
+      const { data, error, count } = await query;
+      
+      if (error) throw error;
 
       const mappedData = data.map(product => ({
         ...product,
@@ -50,10 +63,10 @@ export class ProductService {
 
       return {
         data: mappedData,
-        total: result.total || mappedData.length,
-        page: result.page || 1,
-        limit: result.limit || limit,
-        totalPages: result.totalPages || 1
+        total: count || mappedData.length,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil((count || mappedData.length) / limit) || 1
       };
     } catch (err) {
       console.error('Erro ao filtrar produtos:', err);

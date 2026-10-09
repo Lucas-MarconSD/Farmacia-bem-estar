@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Image as ImageIcon, UploadCloud, ChevronUp, ChevronDown, Upload, Trash2 } from 'lucide-react';
-import { API_URL } from '../config/constants';
+import { supabase } from '../config/supabaseClient';
 
 export default function ManagePhotos() {
   const [products, setProducts] = useState([]);
@@ -9,6 +9,7 @@ export default function ManagePhotos() {
   const [filter, setFilter] = useState('todos'); 
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const limit = 50;
   
   const [sortField, setSortField] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
@@ -26,18 +27,25 @@ export default function ManagePhotos() {
 
   const fetchProducts = async () => {
     setLoading(true);
-    const token = localStorage.getItem('@BemEstar:adminToken');
-    try {
-      const res = await fetch(`${API_URL}/admin/products?search=${search}&page=${page}&limit=50&active=false`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data.data || data);
-        setTotalPages(data.totalPages || 1);
-      }
-    } catch (err) {
-      console.error(err);
+    let query = supabase.from('products').select('*, categories(name)', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,barcode.ilike.%${search}%,external_id.ilike.%${search}%`);
+    }
+
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    query = query.order(sortField, { ascending: sortOrder === 'asc' }).range(from, to);
+
+    const { data, count, error } = await query;
+    if (!error) {
+      const mapped = data.map(p => ({
+        ...p,
+        categoryName: p.categories?.name
+      }));
+      setProducts(mapped);
+      setTotalPages(Math.ceil((count || 0) / limit) || 1);
     }
     setLoading(false);
   };
@@ -98,46 +106,53 @@ export default function ManagePhotos() {
   });
 
   const uploadFile = async (file, productId) => {
-    const token = localStorage.getItem('@BemEstar:adminToken');
-    const formData = new FormData();
-    formData.append('image', file);
-
     try {
-      const res = await fetch(`${API_URL}/admin/products/${productId}/image`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
-      });
+      const ext = file.name.split('.').pop();
+      const fileName = `product-${productId}-${Date.now()}.${ext}`;
       
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(prev => prev.map(p => p.id === productId ? { ...p, image_url: data.image_url } : p));
-        return true;
-      }
+      const { error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(fileName, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('product-images')
+        .getPublicUrl(fileName);
+
+      const imageUrl = publicUrlData.publicUrl;
+
+      const { error: dbError } = await supabase
+        .from('products')
+        .update({ image_url: imageUrl })
+        .eq('id', productId);
+
+      if (dbError) throw dbError;
+
+      setProducts(prev => prev.map(p => p.id === productId ? { ...p, image_url: imageUrl } : p));
+      return true;
     } catch (err) {
-      console.error(err);
+      console.error('Erro ao fazer upload da imagem:', err);
+      return false;
     }
-    return false;
   };
 
   const removePhoto = async (productId) => {
     if (!window.confirm('Tem certeza que deseja remover a foto deste produto?')) return;
     
-    const token = localStorage.getItem('@BemEstar:adminToken');
     try {
-      const res = await fetch(`${API_URL}/admin/products/${productId}/image`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (res.ok) {
-        setProducts(prev => prev.map(p => p.id === productId ? { ...p, image_url: null } : p));
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Erro ao remover foto.');
-      }
+      // In a robust implementation, we would also delete the image from the Supabase Storage bucket here.
+      // For now, we are just removing the URL from the database reference.
+      const { error: dbError } = await supabase
+        .from('products')
+        .update({ image_url: null })
+        .eq('id', productId);
+
+      if (dbError) throw dbError;
+
+      setProducts(prev => prev.map(p => p.id === productId ? { ...p, image_url: null } : p));
     } catch (err) {
-      console.error(err);
+      console.error('Erro ao remover foto:', err);
       alert('Erro de conexão ao remover foto.');
     }
   };

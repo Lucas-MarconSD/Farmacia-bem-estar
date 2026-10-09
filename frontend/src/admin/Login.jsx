@@ -1,32 +1,36 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_URL } from '../config/constants';
+import { supabase } from '../config/supabaseClient';
 import './Admin.css';
 
 export default function Login() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password
       });
-      const data = await res.json();
-      if (res.ok) {
-        localStorage.setItem('@BemEstar:adminToken', data.token);
+
+      if (signInError) {
+        setError('E-mail ou senha incorretos.');
+      } else if (data.session) {
+        // Armazena temporariamente o token no formato antigo para o router atual não quebrar
+        localStorage.setItem('@BemEstar:adminToken', data.session.access_token);
         navigate('/admin');
-      } else {
-        setError(data.error);
       }
     } catch (err) {
       setError('Erro de conexão ao tentar fazer login.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -36,12 +40,13 @@ export default function Login() {
         <h2>Área Administrativa</h2>
         {error && <div className="login-error">{error}</div>}
         <div className="form-group">
-          <label>Usuário</label>
+          <label>E-mail</label>
           <input 
-            type="text" 
-            value={username} 
-            onChange={e => setUsername(e.target.value)}
+            type="email" 
+            value={email} 
+            onChange={e => setEmail(e.target.value)}
             required 
+            placeholder="seu@email.com"
           />
         </div>
         <div className="form-group">
@@ -53,7 +58,9 @@ export default function Login() {
             required 
           />
         </div>
-        <button type="submit" className="login-btn">Entrar</button>
+        <button type="submit" className="login-btn" disabled={loading}>
+          {loading ? 'Autenticando...' : 'Entrar (Supabase)'}
+        </button>
       </form>
     </div>
   );

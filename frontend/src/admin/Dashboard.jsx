@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Edit2, Search, Trash2, Check, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
-import { API_URL } from '../config/constants';
+import { supabase } from '../config/supabaseClient';
 
 export default function Dashboard() {
   const [products, setProducts] = useState([]);
@@ -14,28 +14,39 @@ export default function Dashboard() {
   const [sortField, setSortField] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   const [filterCategory, setFilterCategory] = useState('');
+  const limit = 50;
 
   const fetchProducts = async () => {
-    const token = localStorage.getItem('@BemEstar:adminToken');
-    const res = await fetch(`${API_URL}/admin/products?search=${search}&page=${page}&limit=50&active=false&sortField=${sortField}&sortOrder=${sortOrder}&category=${filterCategory}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setProducts(data.data || data); // compatibility if array or object
-      setTotalPages(data.totalPages || 1);
-    } else if (res.status === 401 || res.status === 403) {
-      localStorage.removeItem('@BemEstar:adminToken');
-      window.location.href = '/admin/login';
+    let query = supabase.from('products').select('*, categories(name)', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,barcode.ilike.%${search}%,external_id.ilike.%${search}%`);
+    }
+
+    if (filterCategory) {
+      query = query.eq('category_id', filterCategory);
+    }
+
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    query = query.order(sortField, { ascending: sortOrder === 'asc' }).range(from, to);
+
+    const { data, count, error } = await query;
+
+    if (!error) {
+      const mapped = data.map(p => ({
+        ...p,
+        categoryName: p.categories?.name
+      }));
+      setProducts(mapped);
+      setTotalPages(Math.ceil((count || 0) / limit) || 1);
     }
   };
 
   const fetchCategories = async () => {
-    const res = await fetch(`${API_URL}/categories`);
-    if (res.ok) {
-      const data = await res.json();
-      setCategories(data);
-    }
+    const { data, error } = await supabase.from('categories').select('*').order('name');
+    if (!error) setCategories(data);
   };
 
   useEffect(() => {
@@ -64,51 +75,43 @@ export default function Dashboard() {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    const token = localStorage.getItem('@BemEstar:adminToken');
     
     const payload = {
       ...editingProduct,
       price: parseFloat(editingProduct.price) || 0,
       old_price: editingProduct.old_price ? parseFloat(editingProduct.old_price) : null,
       stock: parseInt(editingProduct.stock) || 0,
+      category_id: editingProduct.category_id || null
     };
 
-    const isCreating = !editingProduct.id;
-    const url = isCreating ? `${API_URL}/admin/products` : `${API_URL}/admin/products/${editingProduct.id}`;
-    const method = isCreating ? 'POST' : 'PUT';
+    delete payload.categoryName; // Remove helper field
+    delete payload.categories; // Remove helper field
 
-    const res = await fetch(url, {
-      method,
-      headers: { 
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}` 
-      },
-      body: JSON.stringify(payload)
-    });
+    let finalImageUrl = payload.image_url;
 
-    if (res.ok) {
-      const savedData = await res.json();
-      const productId = isCreating ? savedData.id : editingProduct.id;
-
-      if (imageFile && productId) {
-        const formData = new FormData();
-        formData.append('image', imageFile);
-        await fetch(`${API_URL}/admin/products/${productId}/image`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData
-        });
+    if (imageFile) {
+      const ext = imageFile.name.split('.').pop();
+      const fileName = `product-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(fileName, imageFile);
+      
+      if (!uploadError) {
+        const { data: publicUrlData } = supabase.storage.from('product-images').getPublicUrl(fileName);
+        finalImageUrl = publicUrlData.publicUrl;
       }
+    }
+    
+    payload.image_url = finalImageUrl;
 
+    const { error } = await supabase.from('products').upsert(payload);
+
+    if (!error) {
       setEditingProduct(null);
       setImageFile(null);
       fetchProducts();
-    } else if (res.status === 401 || res.status === 403) {
-      localStorage.removeItem('@BemEstar:adminToken');
-      window.location.href = '/admin/login';
     } else {
-      const errorData = await res.json().catch(() => ({}));
-      alert(errorData.error || 'Erro ao salvar produto.');
+      alert('Erro ao salvar produto: ' + error.message);
     }
   };
 
@@ -117,17 +120,10 @@ export default function Dashboard() {
       return;
     }
 
-    const token = localStorage.getItem('@BemEstar:adminToken');
-    const res = await fetch(`${API_URL}/admin/products/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const { error } = await supabase.from('products').delete().eq('id', id);
 
-    if (res.ok) {
+    if (!error) {
       fetchProducts();
-    } else if (res.status === 401 || res.status === 403) {
-      localStorage.removeItem('@BemEstar:adminToken');
-      window.location.href = '/admin/login';
     } else {
       alert('Erro ao apagar produto.');
     }

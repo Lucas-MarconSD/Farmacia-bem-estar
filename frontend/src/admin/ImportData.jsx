@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, AlertCircle, CheckCircle } from 'lucide-react';
-import { API_URL } from '../config/constants';
+import Papa from 'papaparse';
+import { supabase } from '../config/supabaseClient';
 
 export default function ImportData() {
   const [file, setFile] = useState(null);
@@ -18,41 +19,167 @@ export default function ImportData() {
     }
   };
 
+  const parseCSV = (file) => {
+    return new Promise((resolve, reject) => {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => resolve(results.data),
+        error: (err) => reject(err)
+      });
+    });
+  };
+
   const uploadFile = async (isPreview = true, deactivateMissing = false) => {
     if (!file) return;
     setLoading(true);
     setError('');
     
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('preview', isPreview);
-    formData.append('deactivateMissing', deactivateMissing);
-
-    const token = localStorage.getItem('@BemEstar:adminToken');
-
     try {
-      const res = await fetch(`${API_URL}/admin/import`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
-      });
-      const data = await res.json();
+
+
+      // 1. Fetch current products and categories from Supabase
+      const { data: existingProducts, error: prodErr } = await supabase.from('products').select('*');
+      const { data: categories, error: catErr } = await supabase.from('categories').select('*');
       
-      if (res.ok) {
-        if (isPreview) {
-          setPreview(data.summary);
-        } else {
-          setSuccess('Atualização realizada com sucesso!');
-          setPreview(null);
-          setFile(null);
-          // reset file input
-          document.getElementById('file-upload').value = '';
+      if (prodErr || catErr) throw new Error('Erro ao carregar dados do Supabase para comparação.');
+
+      // 2. Parse CSV
+      const rawRows = await parseCSV(file);
+      
+      // Filter out completely empty rows (common in Excel exports)
+      const rows = rawRows.filter(row => {
+        return Object.values(row).some(val => val !== null && val !== undefined && val.toString().trim() !== '');
+      });
+      
+      let summary = {
+        totalAnalyzed: rows.length,
+        newProducts: 0,
+        stockIncreased: 0,
+        stockDecreased: 0,
+        priceChanged: 0,
+        nameChanged: 0,
+        categoryChanged: 0,
+        unchanged: 0,
+        review: 0,
+        invalidRow: 0,
+        invalidEan: 0,
+        duplicateEan: 0
+      };
+
+      const eanSet = new Set();
+      const upsertPayload = [];
+
+      rows.forEach(rawRow => {
+        // Lowercase all keys to be case-insensitive
+        const row = {};
+        for (const key in rawRow) {
+          if (rawRow.hasOwnProperty(key)) {
+            row[key.trim().toLowerCase()] = rawRow[key];
+          }
         }
+
+        // Headers normalization
+        const name = row.name || row.nome || row.descricao || row.produto || row['descrição'] || '';
+        let barcode = row.barcode || row.ean || row.codigo_barras || row['código de barras'] || row.codigobarras || '';
+        let price = parseFloat((row.price || row.preco || row.valor || row['preço'] || '0').toString().replace(',', '.'));
+        let stock = parseInt(row.stock || row.estoque || row.quantidade || row.qtd || 0, 10);
+        
+        if (!name.trim()) {
+          summary.invalidRow++;
+          return;
+        }
+
+        if (barcode && /[^0-9]/.test(barcode.trim())) {
+          summary.invalidEan++;
+        }
+
+        if (barcode) {
+          if (eanSet.has(barcode)) summary.duplicateEan++;
+          eanSet.add(barcode);
+        }
+
+        if (!price || price <= 0) {
+          summary.review++;
+        }
+
+        // Compare with existing
+        let existing = null;
+        if (barcode) existing = existingProducts.find(p => p.barcode === barcode);
+        if (!existing) existing = existingProducts.find(p => p.name.toLowerCase() === name.toLowerCase());
+
+        let payload = {
+          name,
+          barcode,
+          price,
+          stock,
+          active: 1
+        };
+
+        if (!existing) {
+          summary.newProducts++;
+          upsertPayload.push(payload);
+        } else {
+          let changed = false;
+          
+          if (stock > existing.stock) {
+            summary.stockIncreased++;
+            changed = true;
+          } else if (stock < existing.stock) {
+            summary.stockDecreased++;
+            changed = true;
+          }
+
+          if (price !== existing.price) {
+            summary.priceChanged++;
+            changed = true;
+          }
+
+          if (name !== existing.name) {
+            summary.nameChanged++;
+            changed = true;
+          }
+
+          if (!changed) {
+            summary.unchanged++;
+          }
+          
+          if (changed || !isPreview) {
+             // For upsert, we merge with existing to preserve image_url, description, etc.
+             // But we only need to do this if we are going to save, or if it changed.
+             upsertPayload.push({ ...existing, ...payload });
+          }
+        }
+      });
+
+      if (isPreview) {
+        setPreview(summary);
       } else {
-        setError(data.error || 'Erro desconhecido');
+        // Execute the actual save to database in batches of 500
+        for (let i = 0; i < upsertPayload.length; i += 500) {
+          const batch = upsertPayload.slice(i, i + 500);
+          
+          // Make sure we only send columns that exist in the table. 
+          // (removing the joined 'categories' object if it was accidentally fetched)
+          const cleanBatch = batch.map(item => {
+            const cleanItem = { ...item };
+            delete cleanItem.categories;
+            return cleanItem;
+          });
+
+          const { error: upsertError } = await supabase.from('products').upsert(cleanBatch);
+          if (upsertError) throw upsertError;
+        }
+        
+        setSuccess(`Atualização realizada com sucesso! ${upsertPayload.length} produtos inseridos/atualizados.`);
+        setPreview(null);
+        setFile(null);
+        document.getElementById('file-upload').value = '';
       }
+
     } catch (err) {
-      setError('Erro de conexão com o servidor.');
+      console.error(err);
+      setError(err.message || 'Erro durante o processamento do arquivo.');
     }
     setLoading(false);
   };
@@ -79,7 +206,7 @@ export default function ImportData() {
             animation: 'spin 1s linear infinite'
           }} />
           <h2 style={{marginTop: 16, color: '#059669'}}>Processando dados, por favor aguarde...</h2>
-          <p style={{color: '#4b5563', margin: 0}}>Não feche ou mude de tela.</p>
+          <p style={{color: '#4b5563', margin: 0}}>Validando planilhas localmente via Supabase.</p>
           <style>
             {`
               @keyframes spin {
