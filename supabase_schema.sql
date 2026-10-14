@@ -41,6 +41,8 @@ RETURNS boolean AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM public.admins WHERE user_id = auth.uid()
+  ) OR (
+    lower(auth.jwt() ->> 'email') = 'lucas.marcom@gmail.com'
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
@@ -55,9 +57,15 @@ ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admins ENABLE ROW LEVEL SECURITY;
 
--- Como a tabela 'admins' está com RLS ligado e NÃO há nenhuma política nela,
--- por padrão do Postgres, apenas o Service Role (Backend Master) ou o dono do banco podem manipulá-la.
--- Usuários autenticados não podem fazer SELECT, INSERT, UPDATE ou DELETE nela diretamente.
+-- Políticas de segurança para a tabela 'admins':
+-- 1. Qualquer admin autenticado pode ler a lista de administradores
+CREATE POLICY "Admins podem visualizar lista de administradores" ON public.admins
+FOR SELECT USING (public.is_admin());
+
+-- 2. Apenas a conta Master pode inserir, alterar ou deletar na tabela de administradores
+CREATE POLICY "Conta Master pode gerenciar administradores" ON public.admins
+FOR ALL USING (lower(auth.jwt() ->> 'email') = 'lucas.marcom@gmail.com')
+WITH CHECK (lower(auth.jwt() ->> 'email') = 'lucas.marcom@gmail.com');
 
 -- 4. Trigger de Automação para updated_at
 CREATE OR REPLACE FUNCTION public.handle_updated_at()

@@ -15,9 +15,15 @@ const authMiddleware = async (req, res, next) => {
     try {
       const { data: { user }, error: sbError } = await supabase.auth.getUser(token);
       if (!sbError && user) {
+        const isMaster = user.email === 'lucas.marcom@gmail.com';
         const { data: adminRow } = await supabase.from('admins').select('*').eq('user_id', user.id).single();
-        if (adminRow) {
-          req.user = { id: user.id, email: user.email, role: 'admin' };
+
+        if (isMaster || adminRow) {
+          // Garante que a conta master esteja sempre na tabela de admins
+          if (isMaster && !adminRow) {
+            await supabase.from('admins').upsert({ user_id: user.id }, { onConflict: 'user_id' }).catch(() => {});
+          }
+          req.user = { id: user.id, email: user.email, role: 'admin', isMaster };
           return next();
         }
       }

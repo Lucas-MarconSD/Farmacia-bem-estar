@@ -1,9 +1,16 @@
 const supabase = require('../config/supabase');
 
+const MASTER_EMAIL = 'lucas.marcom@gmail.com';
+
 class AdminUserController {
   async listUsers(req, res) {
     if (!supabase) {
       return res.status(500).json({ error: 'Supabase não configurado no backend.' });
+    }
+
+    // Camada de Defesa: Somente a conta Master pode visualizar a lista de administradores
+    if (!req.user || req.user.email !== MASTER_EMAIL) {
+      return res.status(403).json({ error: 'Acesso negado. Apenas a conta Master tem permissão para listar a equipe.' });
     }
 
     try {
@@ -22,7 +29,7 @@ class AdminUserController {
 
       // 3. Cruza os dados para retornar apenas administradores
       const adminUsers = (users || [])
-        .filter(u => adminUserIds.has(u.id))
+        .filter(u => adminUserIds.has(u.id) || u.email === MASTER_EMAIL)
         .map(u => ({
           id: u.id,
           email: u.email,
@@ -43,6 +50,11 @@ class AdminUserController {
       return res.status(500).json({ error: 'Supabase não configurado no backend.' });
     }
 
+    // Camada de Defesa: Somente a conta Master pode cadastrar novos administradores
+    if (!req.user || req.user.email !== MASTER_EMAIL) {
+      return res.status(403).json({ error: 'Acesso negado. Apenas a conta Master tem permissão para cadastrar administradores.' });
+    }
+
     const { email, password } = req.body;
 
     if (!email || !email.includes('@')) {
@@ -55,6 +67,9 @@ class AdminUserController {
 
     try {
       const cleanEmail = email.trim().toLowerCase();
+      let targetUserId = null;
+      let targetUserEmail = cleanEmail;
+      let targetCreatedAt = new Date().toISOString();
 
       // 1. Cria o usuário com confirmação de e-mail automática no Supabase Auth
       const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
@@ -65,33 +80,45 @@ class AdminUserController {
 
       if (createErr) {
         if (createErr.message.includes('already been registered') || createErr.message.includes('unique')) {
-          return res.status(400).json({ error: 'Este e-mail já está cadastrado no sistema.' });
+          // Usuário já foi instanciado pelo cliente isolado no frontend, recupera ID
+          const { data: { users: allUsers } } = await supabase.auth.admin.listUsers();
+          const existing = (allUsers || []).find(u => u.email?.toLowerCase() === cleanEmail);
+          if (!existing) {
+            return res.status(400).json({ error: 'Este e-mail já está cadastrado no sistema.' });
+          }
+          targetUserId = existing.id;
+          targetUserEmail = existing.email;
+          targetCreatedAt = existing.created_at;
+          await supabase.auth.admin.updateUserById(targetUserId, { email_confirm: true }).catch(() => {});
+        } else {
+          throw createErr;
         }
-        throw createErr;
+      } else {
+        targetUserId = newUser?.user?.id;
+        targetUserEmail = newUser?.user?.email;
+        targetCreatedAt = newUser?.user?.created_at;
       }
 
-      if (!newUser || !newUser.user) {
-        throw new Error('Falha ao instanciar usuário no Supabase Auth.');
+      if (!targetUserId) {
+        throw new Error('Falha ao obter ID do usuário no Supabase Auth.');
       }
 
-      // 2. Adiciona o usuário na tabela de administradores 'admins'
+      // 2. Garante registro na tabela de administradores 'admins'
       const { error: adminErr } = await supabase
         .from('admins')
-        .upsert({ user_id: newUser.user.id }, { onConflict: 'user_id' });
+        .upsert({ user_id: targetUserId }, { onConflict: 'user_id' });
 
       if (adminErr) {
-        // Se falhou ao promover, remove o usuário criado para não deixar órfão
-        await supabase.auth.admin.deleteUser(newUser.user.id);
         throw adminErr;
       }
 
       res.status(201).json({
         success: true,
-        message: 'Administrador criado com sucesso!',
+        message: 'Administrador registrado com sucesso!',
         user: {
-          id: newUser.user.id,
-          email: newUser.user.email,
-          created_at: newUser.user.created_at
+          id: targetUserId,
+          email: targetUserEmail,
+          created_at: targetCreatedAt
         }
       });
     } catch (err) {
@@ -105,12 +132,25 @@ class AdminUserController {
       return res.status(500).json({ error: 'Supabase não configurado no backend.' });
     }
 
+    // Camada de Defesa: Somente a conta Master pode revogar acessos
+    if (!req.user || req.user.email !== MASTER_EMAIL) {
+      return res.status(403).json({ error: 'Acesso negado. Apenas a conta Master tem permissão para revogar acessos.' });
+    }
+
     const { id } = req.params;
 
-    // Impede o admin atual de deletar a própria conta
+    // Camada de Defesa: Impede remoção da própria conta na sessão ativa
     if (req.user && (req.user.id === id || req.user.email === id)) {
       return res.status(400).json({ error: 'Você não pode remover sua própria conta de administrador enquanto estiver conectado.' });
     }
+
+    // Camada de Defesa: Protege a conta Master de qualquer exclusão
+    try {
+      const { data: targetUser } = await supabase.auth.admin.getUserById(id);
+      if (targetUser?.user?.email === MASTER_EMAIL) {
+        return res.status(403).json({ error: 'A conta Master é protegida e não pode ser removida.' });
+      }
+    } catch (e) {}
 
     try {
       // 1. Remove da tabela admins
