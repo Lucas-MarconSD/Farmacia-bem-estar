@@ -1,16 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Package, Upload, FolderTree, Zap, Image as ImageIcon, Key } from 'lucide-react';
+import { LogOut, Package, Upload, FolderTree, Zap, Image as ImageIcon, Key, Users } from 'lucide-react';
 import './Admin.css';
 import ChangePassword from './ChangePassword';
+
+import { supabase } from '../config/supabaseClient';
+
+const MASTER_EMAIL = 'lucas.marcom@gmail.com';
 
 export default function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [userEmail, setUserEmail] = useState('');
 
-  const handleLogout = () => {
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data?.user?.email || '');
+    }).catch(() => {});
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
     localStorage.removeItem('@BemEstar:adminToken');
     navigate('/admin/login');
   };
@@ -25,6 +39,7 @@ export default function AdminLayout() {
     { name: 'Gerenciar Fotos', path: '/admin/photos', icon: ImageIcon },
     { name: 'Atualizar Estoque', path: '/admin/import', icon: Upload },
     { name: 'Categorias', path: '/admin/categories', icon: FolderTree },
+    ...(userEmail === MASTER_EMAIL ? [{ name: 'Acessos / Equipe', path: '/admin/users', icon: Users }] : []),
     { name: 'Teste DotCompany', path: '/admin/dotcompany', icon: Zap },
   ];
 

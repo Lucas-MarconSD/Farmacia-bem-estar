@@ -141,8 +141,14 @@ export default function ManagePhotos() {
     if (!window.confirm('Tem certeza que deseja remover a foto deste produto?')) return;
     
     try {
-      // In a robust implementation, we would also delete the image from the Supabase Storage bucket here.
-      // For now, we are just removing the URL from the database reference.
+      const prod = products.find(p => p.id === productId);
+      if (prod && prod.image_url && prod.image_url.includes('product-images/')) {
+        const fileName = prod.image_url.split('product-images/').pop();
+        if (fileName) {
+          await supabase.storage.from('product-images').remove([fileName]);
+        }
+      }
+
       const { error: dbError } = await supabase
         .from('products')
         .update({ image_url: null })

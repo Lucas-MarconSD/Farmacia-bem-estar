@@ -35,14 +35,18 @@ export class ProductService {
 
   static async filterProducts(searchTerm, categorySlug, page = 1, limit = 20) {
     try {
-      let query = supabase.from('products').select('*, categories!inner(slug)', { count: 'exact' });
+      let query;
+      if (categorySlug && categorySlug !== 'todos') {
+        query = supabase.from('products').select('*, categories!inner(slug, name)', { count: 'exact' });
+        query = query.eq('categories.slug', categorySlug);
+      } else {
+        query = supabase.from('products').select('*, categories(slug, name)', { count: 'exact' });
+      }
+
+      query = query.eq('active', true);
 
       if (searchTerm) {
         query = query.ilike('name', `%${searchTerm}%`);
-      }
-
-      if (categorySlug && categorySlug !== 'todos') {
-        query = query.eq('categories.slug', categorySlug);
       }
 
       const from = (page - 1) * limit;
@@ -56,6 +60,7 @@ export class ProductService {
 
       const mappedData = data.map(product => ({
         ...product,
+        categoryName: product.categories?.name || '',
         oldPrice: product.old_price,
         image: product.image_url || null,
         discount: product.old_price ? true : false,
@@ -74,3 +79,4 @@ export class ProductService {
     }
   }
 }
+

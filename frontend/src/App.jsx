@@ -7,6 +7,8 @@ import Dashboard from './admin/Dashboard';
 import ImportData from './admin/ImportData';
 import DotCompanyTest from './admin/DotCompanyTest';
 import ManagePhotos from './admin/ManagePhotos';
+import ManageCategories from './admin/ManageCategories';
+import ManageUsers from './admin/ManageUsers';
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem('@BemEstar:adminToken');
@@ -33,7 +35,8 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="photos" element={<ManagePhotos />} />
           <Route path="import" element={<ImportData />} />
-          <Route path="categories" element={<div>Módulo de Categorias em construção...</div>} />
+          <Route path="categories" element={<ManageCategories />} />
+          <Route path="users" element={<ManageUsers />} />
           <Route path="dotcompany" element={<DotCompanyTest />} />
         </Route>
       </Routes>

@@ -97,3 +97,18 @@ CREATE POLICY "Admins podem deletar produtos" ON public.products FOR DELETE USIN
 CREATE INDEX IF NOT EXISTS idx_products_name ON public.products (name);
 CREATE INDEX IF NOT EXISTS idx_products_category ON public.products (category_id);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products (barcode);
+
+-- 8. Políticas do Storage (product-images)
+-- Leitura pública de fotos de produtos
+CREATE POLICY "Fotos públicas acessíveis por qualquer visitante" ON storage.objects
+FOR SELECT USING (bucket_id = 'product-images');
+
+-- Upload, atualização e deleção permitidos para usuários autenticados (admins)
+CREATE POLICY "Admins podem fazer upload de fotos" ON storage.objects
+FOR INSERT WITH CHECK (bucket_id = 'product-images' AND auth.role() = 'authenticated');
+
+CREATE POLICY "Admins podem atualizar fotos" ON storage.objects
+FOR UPDATE USING (bucket_id = 'product-images' AND auth.role() = 'authenticated');
+
+CREATE POLICY "Admins podem deletar fotos" ON storage.objects
+FOR DELETE USING (bucket_id = 'product-images' AND auth.role() = 'authenticated');

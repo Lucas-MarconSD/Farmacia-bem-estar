@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { X, ShoppingBag, Minus, Plus, Trash2 } from 'lucide-react';
+import { X, ShoppingBag, Minus, Plus, Trash2, Package } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { WHATSAPP_NUMBER } from '../config/constants';
 import './Cart.css';
@@ -53,7 +53,13 @@ export default function Cart({ isOpen, onClose, cartItems, onUpdateQuantity, onR
             <div className="cart-items">
               {cartItems.map(item => (
                 <div key={item.id} className="cart-item">
-                  <img src={item.image} alt={item.name} className="cart-item-image" />
+                  {item.image ? (
+                    <img src={item.image} alt={item.name} className="cart-item-image" />
+                  ) : (
+                    <div className="cart-item-image" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-primary, #00875a)', color: '#fff', borderRadius: '8px' }}>
+                      <Package size={24} />
+                    </div>
+                  )}
                   <div className="cart-item-info">
                     <h4 className="cart-item-name">{item.name}</h4>
                     <span className="cart-item-price">R$ {formatCurrency(item.price)}</span>

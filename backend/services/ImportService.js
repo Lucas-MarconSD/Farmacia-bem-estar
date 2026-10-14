@@ -4,6 +4,7 @@ const xlsx = require('xlsx');
 const CategoryRepository = require('../repositories/CategoryRepository');
 const ProductRepository = require('../repositories/ProductRepository');
 const { createSlug } = require('../utils/slugify');
+const supabase = require('../config/supabase');
 
 const toTitleCase = (str) => {
   if (!str) return '';
@@ -305,6 +306,38 @@ class ImportService {
       });
       
       applyChanges();
+
+      if (supabase) {
+        (async () => {
+          try {
+            // Sincroniza os produtos alterados/criados com o Supabase em background
+            const dbProducts = db.prepare('SELECT id, external_id, barcode, name, description, category_id, brand, price, old_price, stock, image_url, active FROM products').all();
+            const validCategoryIds = new Set(db.prepare('SELECT id FROM categories').all().map(c => c.id));
+            const formatted = dbProducts.map(p => ({
+              id: p.id,
+              external_id: p.external_id || null,
+              barcode: p.barcode ? String(p.barcode).trim() : null,
+              name: p.name.trim(),
+              description: p.description || null,
+              category_id: validCategoryIds.has(p.category_id) ? p.category_id : null,
+              brand: p.brand || null,
+              price: p.price != null ? Number(p.price) : 0,
+              old_price: p.old_price != null ? Number(p.old_price) : null,
+              stock: p.stock != null ? Number(p.stock) : 0,
+              image_url: p.image_url || null,
+              active: p.active === 1
+            }));
+
+            const BATCH = 100;
+            for (let i = 0; i < formatted.length; i += BATCH) {
+              const chunk = formatted.slice(i, i + BATCH);
+              await supabase.from('products').upsert(chunk, { onConflict: 'id' });
+            }
+          } catch (syncErr) {
+            console.error('Erro na sincronização de importação com Supabase:', syncErr.message);
+          }
+        })();
+      }
     }
 
     if (!isPreview && eansToFetch.length > 0) {

@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { X, Key } from 'lucide-react';
-import { API_URL } from '../config/constants';
+import { supabase } from '../config/supabaseClient';
 
 export default function ChangePassword({ onClose, onPasswordChanged }) {
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -13,30 +12,27 @@ export default function ChangePassword({ onClose, onPasswordChanged }) {
     e.preventDefault();
     setError('');
     
+    if (newPassword.length < 6) {
+      return setError('A nova senha deve ter no mínimo 6 caracteres.');
+    }
+
     if (newPassword !== confirmPassword) {
       return setError('A nova senha e a confirmação não coincidem.');
     }
 
     setLoading(true);
     try {
-      const token = localStorage.getItem('@BemEstar:adminToken');
-      const res = await fetch(`${API_URL}/admin/change-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ currentPassword, newPassword, confirmPassword })
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Erro ao alterar a senha.');
+      if (updateError) {
+        throw updateError;
       }
 
       onPasswordChanged();
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Erro ao alterar a senha.');
     } finally {
       setLoading(false);
     }
@@ -52,15 +48,6 @@ export default function ChangePassword({ onClose, onPasswordChanged }) {
         <form onSubmit={handleSubmit} className="modal-form">
           {error && <div className="error-message" style={{ color: 'red', marginBottom: '1rem', backgroundColor: '#ffe6e6', padding: '10px', borderRadius: '4px' }}>{error}</div>}
           
-          <div className="form-group">
-            <label>Senha Atual</label>
-            <input 
-              type="password" 
-              required 
-              value={currentPassword} 
-              onChange={e => setCurrentPassword(e.target.value)} 
-            />
-          </div>
           
           <div className="form-group">
             <label>Nova Senha</label>

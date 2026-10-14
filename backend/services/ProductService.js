@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const ProductRepository = require('../repositories/ProductRepository');
+const supabase = require('../config/supabase');
 
 class ProductService {
   getProducts(query) {
@@ -42,7 +43,29 @@ class ProductService {
       image_url: data.image_url || null
     });
 
-    return { success: true, id: info.lastInsertRowid };
+    const newId = Number(info.lastInsertRowid);
+
+    // Sincroniza em tempo real com o Supabase para refletir imediatamente no frontend
+    if (supabase) {
+      supabase.from('products').upsert({
+        id: newId,
+        name: data.name,
+        description: data.description || null,
+        category_id: categoryId,
+        price: parseFloat(data.price) || 0,
+        old_price: data.old_price ? parseFloat(data.old_price) : null,
+        stock: parseInt(data.stock, 10) || 0,
+        active: data.active !== undefined ? (data.active ? true : false) : true,
+        external_id: data.external_id || null,
+        barcode: data.barcode || null,
+        brand: data.brand || null,
+        image_url: data.image_url || null
+      }, { onConflict: 'id' }).then(({ error }) => {
+        if (error) console.error('Erro ao sincronizar novo produto no Supabase:', error.message);
+      });
+    }
+
+    return { success: true, id: newId };
   }
 
   updateProduct(id, data) {
@@ -62,6 +85,26 @@ class ProductService {
       barcode: data.barcode || null,
       brand: data.brand || null
     });
+
+    // Sincroniza atualização com o Supabase
+    if (supabase) {
+      supabase.from('products').update({
+        name: data.name,
+        description: data.description || null,
+        category_id: categoryId,
+        price: parseFloat(data.price) || 0,
+        old_price: data.old_price ? parseFloat(data.old_price) : null,
+        stock: parseInt(data.stock, 10) || 0,
+        active: data.active ? true : false,
+        external_id: data.external_id || null,
+        barcode: data.barcode || null,
+        brand: data.brand || null,
+        updated_at: new Date().toISOString()
+      }).eq('id', id).then(({ error }) => {
+        if (error) console.error('Erro ao sincronizar atualização no Supabase:', error.message);
+      });
+    }
+
     return { success: true };
   }
 
@@ -72,6 +115,14 @@ class ProductService {
       // Ignore if no image exists
     }
     ProductRepository.delete(id);
+
+    // Sincroniza deleção com o Supabase
+    if (supabase) {
+      supabase.from('products').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Erro ao sincronizar deleção no Supabase:', error.message);
+      });
+    }
+
     return { success: true };
   }
 
@@ -84,6 +135,16 @@ class ProductService {
 
     if (oldImageUrl && oldImageUrl.includes('/uploads/')) {
       this.cleanupOldImage(oldImageUrl);
+    }
+
+    // Sincroniza URL da imagem com o Supabase
+    if (supabase) {
+      supabase.from('products').update({
+        image_url: imageUrl,
+        updated_at: new Date().toISOString()
+      }).eq('id', id).then(({ error }) => {
+        if (error) console.error('Erro ao sincronizar imagem no Supabase:', error.message);
+      });
     }
 
     return imageUrl;
@@ -100,6 +161,16 @@ class ProductService {
 
     if (oldImageUrl.includes('/uploads/')) {
       this.cleanupOldImage(oldImageUrl);
+    }
+
+    // Sincroniza remoção de imagem com o Supabase
+    if (supabase) {
+      supabase.from('products').update({
+        image_url: null,
+        updated_at: new Date().toISOString()
+      }).eq('id', id).then(({ error }) => {
+        if (error) console.error('Erro ao remover imagem no Supabase:', error.message);
+      });
     }
   }
 

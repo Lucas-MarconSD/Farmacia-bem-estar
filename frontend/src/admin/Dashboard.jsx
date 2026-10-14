@@ -81,7 +81,8 @@ export default function Dashboard() {
       price: parseFloat(editingProduct.price) || 0,
       old_price: editingProduct.old_price ? parseFloat(editingProduct.old_price) : null,
       stock: parseInt(editingProduct.stock) || 0,
-      category_id: editingProduct.category_id || null
+      category_id: editingProduct.category_id ? Number(editingProduct.category_id) : null,
+      active: Boolean(editingProduct.active !== false && editingProduct.active !== 0 && editingProduct.active !== '0')
     };
 
     delete payload.categoryName; // Remove helper field
@@ -131,7 +132,7 @@ export default function Dashboard() {
 
   const openCreateForm = () => {
     setEditingProduct({
-      name: '', external_id: '', barcode: '', brand: '', category_id: '', description: '', price: '', old_price: '', stock: '', active: 1
+      name: '', external_id: '', barcode: '', brand: '', category_id: '', description: '', price: '', old_price: '', stock: '', active: true
     });
     setImageFile(null);
   };
@@ -254,8 +255,8 @@ export default function Dashboard() {
             <input 
               type="checkbox" 
               id="active"
-              checked={editingProduct.active === 1}
-              onChange={e => setEditingProduct({...editingProduct, active: e.target.checked ? 1 : 0})}
+              checked={Boolean(editingProduct.active !== false && editingProduct.active !== 0 && editingProduct.active !== '0')}
+              onChange={e => setEditingProduct({...editingProduct, active: e.target.checked})}
               style={{width: 'auto'}}
             />
             <label htmlFor="active" style={{margin: 0}}>Exibir no catálogo público</label>
