@@ -314,3 +314,9 @@
   background-color: #fde8e8;
   color: #9b1c1c;
 }
+
+.status-badge:hover {
+  filter: brightness(0.92);
+  transform: translateY(-1px);
+}
+

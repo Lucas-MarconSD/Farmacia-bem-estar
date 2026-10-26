@@ -108,12 +108,22 @@ export default function ImportData() {
         if (barcode) existing = existingProducts.find(p => p.barcode === barcode);
         if (!existing) existing = existingProducts.find(p => p.name.toLowerCase() === name.toLowerCase());
 
+        let active = existing ? (existing.active ?? true) : true;
+        if (row.active !== undefined || row.ativo !== undefined || row.status !== undefined) {
+          const val = (row.active ?? row.ativo ?? row.status).toString().trim().toLowerCase();
+          if (['0', 'false', 'inativo', 'desativado', 'não', 'nao'].includes(val)) {
+            active = false;
+          } else if (['1', 'true', 'ativo', 'sim'].includes(val)) {
+            active = true;
+          }
+        }
+
         let payload = {
           name,
           barcode,
           price,
           stock,
-          active: 1
+          active
         };
 
         if (!existing) {

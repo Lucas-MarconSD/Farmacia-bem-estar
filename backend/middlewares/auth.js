@@ -2,6 +2,12 @@ const { verifyToken } = require('../security/jwt');
 const UserRepository = require('../repositories/UserRepository');
 const supabase = require('../config/supabase');
 
+const MASTER_EMAILS = [
+  'lucas.marcom@gmail.com',
+  'drogariabemstar2024@gmail.com'
+];
+const isMaster = (email) => MASTER_EMAILS.includes(email?.toLowerCase());
+
 const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -15,15 +21,15 @@ const authMiddleware = async (req, res, next) => {
     try {
       const { data: { user }, error: sbError } = await supabase.auth.getUser(token);
       if (!sbError && user) {
-        const isMaster = user.email === 'lucas.marcom@gmail.com';
+        const userIsMaster = isMaster(user.email);
         const { data: adminRow } = await supabase.from('admins').select('*').eq('user_id', user.id).single();
 
-        if (isMaster || adminRow) {
+        if (userIsMaster || adminRow) {
           // Garante que a conta master esteja sempre na tabela de admins
-          if (isMaster && !adminRow) {
+          if (userIsMaster && !adminRow) {
             await supabase.from('admins').upsert({ user_id: user.id }, { onConflict: 'user_id' }).catch(() => {});
           }
-          req.user = { id: user.id, email: user.email, role: 'admin', isMaster };
+          req.user = { id: user.id, email: user.email, role: 'admin', isMaster: userIsMaster };
           return next();
         }
       }

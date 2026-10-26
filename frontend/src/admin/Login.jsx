@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabaseClient';
 import './Admin.css';
 
+const MASTER_EMAILS = [
+  'lucas.marcom@gmail.com',
+  'drogariabemstar2024@gmail.com'
+];
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -15,30 +20,55 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
+      const cleanEmail = email.trim().toLowerCase();
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password
       });
 
       if (signInError) {
         setError('E-mail ou senha incorretos.');
       } else if (data.session && data.user) {
-        const isMaster = data.user.email?.toLowerCase() === 'lucas.marcom@gmail.com';
+        const userEmail = data.user.email?.toLowerCase();
+        const isMaster = MASTER_EMAILS.includes(userEmail);
         
-        // Camada de Defesa: Valida se o usuário tem cargo de administrador
-        if (!isMaster) {
-          const { data: adminRow } = await supabase
-            .from('admins')
-            .select('user_id')
-            .eq('user_id', data.user.id)
-            .single();
+        let hasAccess = isMaster;
 
-          if (!adminRow) {
-            await supabase.auth.signOut();
-            localStorage.removeItem('@BemEstar:adminToken');
-            setError('Acesso negado: Esta conta não possui privilégios de administrador.');
-            return;
+        // Se não for da lista master, valida se o usuário tem privilégio de administrador
+        if (!hasAccess) {
+          // 1. Tenta verificar via função RPC is_admin
+          try {
+            const { data: rpcAdmin } = await supabase.rpc('is_admin');
+            if (rpcAdmin === true) {
+              hasAccess = true;
+            }
+          } catch (rpcErr) {
+            console.warn('Erro ao chamar is_admin RPC:', rpcErr);
           }
+
+          // 2. Se a RPC não confirmou, tenta consultar a tabela admins
+          if (!hasAccess) {
+            try {
+              const { data: adminRow } = await supabase
+                .from('admins')
+                .select('user_id')
+                .eq('user_id', data.user.id)
+                .maybeSingle();
+
+              if (adminRow) {
+                hasAccess = true;
+              }
+            } catch (tableErr) {
+              console.warn('Erro ao consultar tabela admins:', tableErr);
+            }
+          }
+        }
+
+        if (!hasAccess) {
+          await supabase.auth.signOut();
+          localStorage.removeItem('@BemEstar:adminToken');
+          setError('Acesso negado: Esta conta não possui privilégios de administrador.');
+          return;
         }
 
         // Armazena o token de sessão e redireciona para o painel

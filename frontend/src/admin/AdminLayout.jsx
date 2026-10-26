@@ -6,7 +6,10 @@ import ChangePassword from './ChangePassword';
 
 import { supabase } from '../config/supabaseClient';
 
-const MASTER_EMAIL = 'lucas.marcom@gmail.com';
+const MASTER_EMAILS = [
+  'lucas.marcom@gmail.com',
+  'drogariabemstar2024@gmail.com'
+];
 
 export default function AdminLayout() {
   const navigate = useNavigate();
@@ -17,7 +20,7 @@ export default function AdminLayout() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      setUserEmail(data?.user?.email || '');
+      setUserEmail(data?.user?.email?.toLowerCase() || '');
     }).catch(() => {});
   }, []);
 
@@ -34,12 +37,14 @@ export default function AdminLayout() {
     handleLogout();
   };
 
+  const isMasterUser = MASTER_EMAILS.includes(userEmail);
+
   const menu = [
     { name: 'Produtos', path: '/admin', icon: Package },
     { name: 'Gerenciar Fotos', path: '/admin/photos', icon: ImageIcon },
     { name: 'Atualizar Estoque', path: '/admin/import', icon: Upload },
     { name: 'Categorias', path: '/admin/categories', icon: FolderTree },
-    ...(userEmail === MASTER_EMAIL ? [{ name: 'Acessos / Equipe', path: '/admin/users', icon: Users }] : []),
+    ...(isMasterUser ? [{ name: 'Acessos / Equipe', path: '/admin/users', icon: Users }] : []),
     { name: 'Teste DotCompany', path: '/admin/dotcompany', icon: Zap },
   ];
 

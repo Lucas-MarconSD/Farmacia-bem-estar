@@ -4,7 +4,12 @@ import { ShieldCheck, UserPlus, Trash2, RefreshCw, CheckCircle, AlertCircle, Eye
 import { supabase } from '../config/supabaseClient';
 import { API_URL } from '../config/constants';
 
-const MASTER_EMAIL = 'lucas.marcom@gmail.com';
+const MASTER_EMAILS = [
+  'lucas.marcom@gmail.com',
+  'drogariabemstar2024@gmail.com'
+];
+const isMaster = (email) => MASTER_EMAILS.includes(email?.toLowerCase());
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://xhwrlvmpsddqpjfzhhwf.supabase.co';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_OIuhc5e-K8-i4ZmCGfcVIg_4j12iZN_';
 
@@ -42,23 +47,27 @@ export default function ManageUsers() {
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
-      } else {
-        // Fallback local se o backend não estiver respondendo
-        setUsers([
-          { id: '1', email: MASTER_EMAIL, isCurrent: true, created_at: new Date().toISOString() }
-        ]);
+        setLoading(false);
+        return;
       }
     } catch (err) {
-      setUsers([
-        { id: '1', email: MASTER_EMAIL, isCurrent: true, created_at: new Date().toISOString() }
-      ]);
-    } finally {
-      setLoading(false);
+      // Backend offline
     }
+
+    // Fallback: se o backend não estiver respondendo (ex: no Vercel ou servidor local desligado),
+    // lista as contas de administração master conhecidas
+    const defaultList = MASTER_EMAILS.map((mEmail, idx) => ({
+      id: `master-${idx + 1}`,
+      email: mEmail,
+      isCurrent: currentUser?.email?.toLowerCase() === mEmail.toLowerCase(),
+      created_at: new Date().toISOString()
+    }));
+    setUsers(defaultList);
+    setLoading(false);
   };
 
   useEffect(() => {
-    if (currentUser?.email === MASTER_EMAIL) {
+    if (isMaster(currentUser?.email)) {
       fetchUsers();
     }
   }, [currentUser]);
@@ -86,41 +95,13 @@ export default function ManageUsers() {
     setSuccess('');
 
     const targetEmail = email.trim().toLowerCase();
+    const token = localStorage.getItem('@BemEstar:adminToken');
 
     try {
-      // 1. Cria um segundo cliente isolado do Supabase para NÃO deslogar a sessão atual Master
-      const tempSupabase = createClient(supabaseUrl, supabaseKey, {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-          detectSessionInUrl: false
-        }
-      });
-
-      // 2. Cria a conta no Supabase Auth usando o cliente isolado
-      const { data: signUpData, error: signUpError } = await tempSupabase.auth.signUp({
-        email: targetEmail,
-        password: password
-      });
-
-      if (signUpError) {
-        throw signUpError;
-      }
-
-      // 3. Garante que o novo usuário seja registrado na tabela de administradores
-      const newUserId = signUpData?.user?.id;
-      if (newUserId) {
-        try {
-          await supabase.from('admins').upsert({ user_id: newUserId }, { onConflict: 'user_id' });
-        } catch (e) {
-          console.warn('Erro ao inserir na tabela admins via client:', e);
-        }
-      }
-
-      // 4. Notifica o backend para confirmar o e-mail e garantir permissões completas
+      // 1. Tenta primeiramente via backend (se estiver ativo), que confirma o e-mail automaticamente
+      let createdViaBackend = false;
       try {
-        const token = localStorage.getItem('@BemEstar:adminToken');
-        await fetch(`${API_URL}/admin/users`, {
+        const res = await fetch(`${API_URL}/admin/users`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -128,17 +109,57 @@ export default function ManageUsers() {
           },
           body: JSON.stringify({ email: targetEmail, password })
         });
-      } catch (backendErr) {
-        // Backend opcional, prossegue normalmente
+
+        if (res.ok) {
+          createdViaBackend = true;
+        } else {
+          const errData = await res.json().catch(() => null);
+          if (errData?.error && !errData.error.includes('fetch')) {
+            throw new Error(errData.error);
+          }
+        }
+      } catch (backendFetchErr) {
+        if (backendFetchErr.message && !backendFetchErr.message.includes('fetch') && !backendFetchErr.message.includes('Failed')) {
+          throw backendFetchErr;
+        }
       }
 
-      setSuccess(`Conta criada com sucesso no Supabase para "${targetEmail}"! O dono da farmácia já pode fazer login no painel.`);
+      // 2. Se o backend não estava acessível ou não concluiu, usa o cliente isolado Supabase
+      if (!createdViaBackend) {
+        const tempSupabase = createClient(supabaseUrl, supabaseKey, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+          }
+        });
+
+        const { data: signUpData, error: signUpError } = await tempSupabase.auth.signUp({
+          email: targetEmail,
+          password: password
+        });
+
+        if (signUpError && !signUpError.message.includes('already been registered') && !signUpError.message.includes('unique')) {
+          throw signUpError;
+        }
+
+        const newUserId = signUpData?.user?.id;
+        if (newUserId) {
+          try {
+            await supabase.from('admins').upsert({ user_id: newUserId }, { onConflict: 'user_id' });
+          } catch (e) {
+            console.warn('Erro ao inserir na tabela admins:', e);
+          }
+        }
+      }
+
+      setSuccess(`Conta para "${targetEmail}" configurada com sucesso! O acesso administrativo está liberado.`);
       setEmail('');
       setPassword('');
       fetchUsers();
     } catch (err) {
       console.error('Erro na criação de usuário:', err);
-      setError(err.message || 'Erro ao criar conta no Supabase.');
+      setError(err.message || 'Erro ao criar conta de acesso.');
     } finally {
       setIsSubmitting(false);
     }
@@ -163,8 +184,8 @@ export default function ManageUsers() {
         setSuccess(`Acesso de "${userEmail}" revogado com sucesso.`);
         fetchUsers();
       } else {
-        const data = await res.json();
-        throw new Error(data.error || 'Erro ao revogar acesso.');
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Erro ao revogar acesso. Verifique se o servidor backend está online.');
       }
     } catch (err) {
       console.error('Erro ao deletar usuário:', err);
@@ -180,8 +201,8 @@ export default function ManageUsers() {
     );
   }
 
-  // Bloqueio de segurança: Apenas a conta Master tem acesso a esta tela
-  if (currentUser?.email !== MASTER_EMAIL) {
+  // Bloqueio de segurança: Apenas as contas Master têm acesso a esta tela
+  if (!isMaster(currentUser?.email)) {
     return (
       <div className="admin-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
         <div style={{ color: '#EF725D', marginBottom: 16 }}>
@@ -189,7 +210,7 @@ export default function ManageUsers() {
         </div>
         <h2 style={{ color: '#1C2A25', marginBottom: 8 }}>Acesso Restrito</h2>
         <p style={{ color: '#4b5563', maxWidth: 480, margin: '0 auto 24px auto' }}>
-          Esta tela de gerenciamento de equipe e criação de contas é de uso exclusivo da conta Master (<code>{MASTER_EMAIL}</code>).
+          Esta tela de gerenciamento de equipe e criação de contas é de uso exclusivo das contas Master ({MASTER_EMAILS.join(', ')}).
         </p>
         <button className="btn-primary" onClick={() => window.location.href = '/admin'}>
           Voltar para Produtos
@@ -326,8 +347,8 @@ export default function ManageUsers() {
                           width: 36,
                           height: 36,
                           borderRadius: '50%',
-                          background: u.email === MASTER_EMAIL ? '#def7ec' : '#f3f4f6',
-                          color: u.email === MASTER_EMAIL ? '#03543f' : '#4b5563',
+                          background: isMaster(u.email) ? '#def7ec' : '#f3f4f6',
+                          color: isMaster(u.email) ? '#03543f' : '#4b5563',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -337,7 +358,7 @@ export default function ManageUsers() {
                         </div>
                         <div>
                           <strong>{u.email}</strong>
-                          {u.email === MASTER_EMAIL && (
+                          {isMaster(u.email) && (
                             <span style={{
                               marginLeft: 8,
                               fontSize: '0.75rem',
@@ -347,7 +368,7 @@ export default function ManageUsers() {
                               borderRadius: 12,
                               fontWeight: 600
                             }}>
-                              Master (Você)
+                              {currentUser?.email?.toLowerCase() === u.email?.toLowerCase() ? 'Master (Você)' : 'Master'}
                             </span>
                           )}
                         </div>
@@ -355,15 +376,15 @@ export default function ManageUsers() {
                     </td>
                     <td>
                       <span className="status-badge status-active">
-                        {u.email === MASTER_EMAIL ? 'Super Administrador' : 'Administrador'}
+                        {isMaster(u.email) ? 'Super Administrador' : 'Administrador'}
                       </span>
                     </td>
                     <td style={{ color: '#4b5563', fontSize: '0.9rem' }}>
                       {u.created_at ? new Date(u.created_at).toLocaleDateString('pt-BR') : '-'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      {u.email === MASTER_EMAIL ? (
-                        <span style={{ fontSize: '0.8rem', color: '#9ca3af' }}>Sessão Atual</span>
+                      {isMaster(u.email) ? (
+                        <span style={{ fontSize: '0.8rem', color: '#9ca3af' }}>Sessão Protegida</span>
                       ) : (
                         <button
                           className="btn-secondary"

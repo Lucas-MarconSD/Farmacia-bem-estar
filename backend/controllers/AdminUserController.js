@@ -1,6 +1,10 @@
 const supabase = require('../config/supabase');
 
-const MASTER_EMAIL = 'lucas.marcom@gmail.com';
+const MASTER_EMAILS = [
+  'lucas.marcom@gmail.com',
+  'drogariabemstar2024@gmail.com'
+];
+const isMaster = (email) => MASTER_EMAILS.includes(email?.toLowerCase());
 
 class AdminUserController {
   async listUsers(req, res) {
@@ -9,8 +13,8 @@ class AdminUserController {
     }
 
     // Camada de Defesa: Somente a conta Master pode visualizar a lista de administradores
-    if (!req.user || req.user.email !== MASTER_EMAIL) {
-      return res.status(403).json({ error: 'Acesso negado. Apenas a conta Master tem permissão para listar a equipe.' });
+    if (!req.user || !isMaster(req.user.email)) {
+      return res.status(403).json({ error: 'Acesso negado. Apenas a equipe Master tem permissão para listar a equipe.' });
     }
 
     try {
@@ -29,7 +33,7 @@ class AdminUserController {
 
       // 3. Cruza os dados para retornar apenas administradores
       const adminUsers = (users || [])
-        .filter(u => adminUserIds.has(u.id) || u.email === MASTER_EMAIL)
+        .filter(u => adminUserIds.has(u.id) || isMaster(u.email))
         .map(u => ({
           id: u.id,
           email: u.email,
@@ -51,8 +55,8 @@ class AdminUserController {
     }
 
     // Camada de Defesa: Somente a conta Master pode cadastrar novos administradores
-    if (!req.user || req.user.email !== MASTER_EMAIL) {
-      return res.status(403).json({ error: 'Acesso negado. Apenas a conta Master tem permissão para cadastrar administradores.' });
+    if (!req.user || !isMaster(req.user.email)) {
+      return res.status(403).json({ error: 'Acesso negado. Apenas a equipe Master tem permissão para cadastrar administradores.' });
     }
 
     const { email, password } = req.body;
@@ -133,8 +137,8 @@ class AdminUserController {
     }
 
     // Camada de Defesa: Somente a conta Master pode revogar acessos
-    if (!req.user || req.user.email !== MASTER_EMAIL) {
-      return res.status(403).json({ error: 'Acesso negado. Apenas a conta Master tem permissão para revogar acessos.' });
+    if (!req.user || !isMaster(req.user.email)) {
+      return res.status(403).json({ error: 'Acesso negado. Apenas a equipe Master tem permissão para revogar acessos.' });
     }
 
     const { id } = req.params;
@@ -144,11 +148,11 @@ class AdminUserController {
       return res.status(400).json({ error: 'Você não pode remover sua própria conta de administrador enquanto estiver conectado.' });
     }
 
-    // Camada de Defesa: Protege a conta Master de qualquer exclusão
+    // Camada de Defesa: Protege as contas Master de qualquer exclusão
     try {
       const { data: targetUser } = await supabase.auth.admin.getUserById(id);
-      if (targetUser?.user?.email === MASTER_EMAIL) {
-        return res.status(403).json({ error: 'A conta Master é protegida e não pode ser removida.' });
+      if (isMaster(targetUser?.user?.email)) {
+        return res.status(403).json({ error: 'Contas Master são protegidas e não podem ser removidas.' });
       }
     } catch (e) {}
 

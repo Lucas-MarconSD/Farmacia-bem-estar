@@ -42,7 +42,7 @@ BEGIN
   RETURN EXISTS (
     SELECT 1 FROM public.admins WHERE user_id = auth.uid()
   ) OR (
-    lower(auth.jwt() ->> 'email') = 'lucas.marcom@gmail.com'
+    lower(auth.jwt() ->> 'email') IN ('lucas.marcom@gmail.com', 'drogariabemstar2024@gmail.com')
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
@@ -64,8 +64,8 @@ FOR SELECT USING (public.is_admin());
 
 -- 2. Apenas a conta Master pode inserir, alterar ou deletar na tabela de administradores
 CREATE POLICY "Conta Master pode gerenciar administradores" ON public.admins
-FOR ALL USING (lower(auth.jwt() ->> 'email') = 'lucas.marcom@gmail.com')
-WITH CHECK (lower(auth.jwt() ->> 'email') = 'lucas.marcom@gmail.com');
+FOR ALL USING (lower(auth.jwt() ->> 'email') IN ('lucas.marcom@gmail.com', 'drogariabemstar2024@gmail.com'))
+WITH CHECK (lower(auth.jwt() ->> 'email') IN ('lucas.marcom@gmail.com', 'drogariabemstar2024@gmail.com'));
 
 -- 4. Trigger de Automação para updated_at
 CREATE OR REPLACE FUNCTION public.handle_updated_at()

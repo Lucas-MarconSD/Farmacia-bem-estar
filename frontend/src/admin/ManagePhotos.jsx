@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Image as ImageIcon, UploadCloud, ChevronUp, ChevronDown, Upload, Trash2 } from 'lucide-react';
+import { Search, Image as ImageIcon, UploadCloud, ChevronUp, ChevronDown, Upload, Trash2, Check, X } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 
 export default function ManagePhotos() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filter, setFilter] = useState('todos'); 
+  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'active', 'inactive'
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const limit = 50;
   
   const [sortField, setSortField] = useState('name');
@@ -19,91 +22,205 @@ export default function ManagePhotos() {
   const [uploadingId, setUploadingId] = useState(null);
   const [bulkUploading, setBulkUploading] = useState(false);
   
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const [dragHoverId, setDragHoverId] = useState(null);
 
+  // Debounce na busca
   useEffect(() => {
-    fetchProducts();
-  }, [page]);
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const getDbSortColumn = (field) => {
+    switch (field) {
+      case 'active':
+      case 'status':
+        return 'active';
+      case 'category':
+      case 'categoryName':
+        return 'category_id';
+      case 'price':
+        return 'price';
+      case 'stock':
+        return 'stock';
+      case 'external_id':
+      case 'id':
+        return 'id';
+      case 'name':
+      default:
+        return 'name';
+    }
+  };
 
   const fetchProducts = async () => {
     setLoading(true);
     let query = supabase.from('products').select('*, categories(name)', { count: 'exact' });
 
-    if (search) {
-      query = query.or(`name.ilike.%${search}%,barcode.ilike.%${search}%,external_id.ilike.%${search}%`);
+    const term = debouncedSearch.trim();
+    if (term) {
+      query = query.or(`name.ilike.%${term}%,barcode.ilike.%${term}%,external_id.ilike.%${term}%`);
+    }
+
+    if (filter === 'com') {
+      query = query.not('image_url', 'is', null).neq('image_url', '');
+    } else if (filter === 'sem') {
+      query = query.or('image_url.is.null,image_url.eq.""');
+    }
+
+    if (filterStatus === 'active') {
+      query = query.eq('active', true);
+    } else if (filterStatus === 'inactive') {
+      query = query.eq('active', false);
+    }
+
+    const dbSort = getDbSortColumn(sortField);
+    query = query.order(dbSort, { ascending: sortOrder === 'asc', nullsFirst: false });
+
+    if (dbSort !== 'name') {
+      query = query.order('name', { ascending: true });
     }
 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    query = query.order(sortField, { ascending: sortOrder === 'asc' }).range(from, to);
+    query = query.range(from, to);
 
     const { data, count, error } = await query;
-    if (!error) {
+    if (!error && data) {
       const mapped = data.map(p => ({
         ...p,
         categoryName: p.categories?.name
       }));
       setProducts(mapped);
+      setTotalCount(count || 0);
       setTotalPages(Math.ceil((count || 0) / limit) || 1);
+    } else if (error) {
+      console.error('Erro ao buscar produtos para fotos:', error);
     }
     setLoading(false);
   };
 
   useEffect(() => {
-    const delay = setTimeout(() => {
-      if (page !== 1) setPage(1);
-      else fetchProducts();
-    }, 400);
-    return () => clearTimeout(delay);
-  }, [search]);
+    fetchProducts();
+    setSelectedIds([]);
+  }, [debouncedSearch, page, sortField, sortOrder, filter, filterStatus]);
 
   const handleSort = (field) => {
     if (sortField === field) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+      setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortField(field);
       setSortOrder('asc');
     }
+    setPage(1);
   };
 
-  const filteredProducts = products.filter(p => {
-    if (filter === 'com') return p.image_url && p.image_url.trim() !== '';
-    if (filter === 'sem') return !p.image_url || p.image_url.trim() === '';
-    return true;
-  });
+  const handleSelectOne = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
+  };
 
-  const sortedProducts = [...filteredProducts].sort((a, b) => {
-    let valA = a[sortField];
-    let valB = b[sortField];
-    
-    // Numeric sort for Price and Stock
-    if (sortField === 'price' || sortField === 'stock') {
-      valA = parseFloat(valA) || 0;
-      valB = parseFloat(valB) || 0;
-      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-      return 0;
+  const handleSelectAllOnPage = () => {
+    const pageIds = products.map(p => p.id);
+    const allSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds(prev => prev.filter(id => !pageIds.includes(id)));
+    } else {
+      setSelectedIds(prev => Array.from(new Set([...prev, ...pageIds])));
     }
-    
-    // Boolean sort for active (Status)
-    if (sortField === 'active') {
-      valA = valA === 1 ? 1 : 0;
-      valB = valB === 1 ? 1 : 0;
-      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-      return 0;
+  };
+
+  const handleBulkActivate = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkLoading(true);
+    const idsToUpdate = [...selectedIds];
+
+    setProducts(prev => prev.map(p => idsToUpdate.includes(p.id) ? { ...p, active: true } : p));
+
+    const { error } = await supabase
+      .from('products')
+      .update({ active: true })
+      .in('id', idsToUpdate);
+
+    if (error) {
+      alert('Erro ao ativar produtos em massa: ' + error.message);
+      fetchProducts();
+    } else {
+      setSelectedIds([]);
+      fetchProducts();
+    }
+    setBulkLoading(false);
+  };
+
+  const handleBulkDeactivate = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkLoading(true);
+    const idsToUpdate = [...selectedIds];
+
+    setProducts(prev => prev.map(p => idsToUpdate.includes(p.id) ? { ...p, active: false } : p));
+
+    const { error } = await supabase
+      .from('products')
+      .update({ active: false })
+      .in('id', idsToUpdate);
+
+    if (error) {
+      alert('Erro ao desativar produtos em massa: ' + error.message);
+      fetchProducts();
+    } else {
+      setSelectedIds([]);
+      fetchProducts();
+    }
+    setBulkLoading(false);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    if (!window.confirm(`Tem certeza que deseja EXCLUIR DEFINITIVAMENTE os ${count} produto(s) selecionado(s)? Esta ação removerá os produtos do banco e não poderá ser desfeita.`)) {
+      return;
     }
 
-    if (valA === null || valA === undefined) valA = '';
-    if (valB === null || valB === undefined) valB = '';
-    if (typeof valA === 'string') valA = valA.toLowerCase();
-    if (typeof valB === 'string') valB = valB.toLowerCase();
-    
-    if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-    if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-    return 0;
-  });
+    setBulkLoading(true);
+    const idsToDelete = [...selectedIds];
+
+    setProducts(prev => prev.filter(p => !idsToDelete.includes(p.id)));
+
+    const { error } = await supabase
+      .from('products')
+      .delete()
+      .in('id', idsToDelete);
+
+    if (error) {
+      alert('Erro ao excluir produtos em massa: ' + error.message);
+      fetchProducts();
+    } else {
+      setSelectedIds([]);
+      fetchProducts();
+    }
+    setBulkLoading(false);
+  };
+
+  const handleToggleActive = async (p) => {
+    const nextStatus = !p.active;
+    setProducts(prev => prev.map(item => item.id === p.id ? { ...item, active: nextStatus } : item));
+
+    const { error } = await supabase
+      .from('products')
+      .update({ active: nextStatus })
+      .eq('id', p.id);
+
+    if (error) {
+      console.error('Erro ao alterar status:', error);
+      alert('Não foi possível alterar o status: ' + error.message);
+      fetchProducts();
+    }
+  };
+
+  const sortedProducts = products;
 
   const uploadFile = async (file, productId) => {
     try {
@@ -237,7 +354,7 @@ export default function ManagePhotos() {
         com fotos renomeadas com o ID do produto (ex: <code style={{backgroundColor:'#f3f4f6', padding:'2px 4px', borderRadius:4}}>10254.jpg</code>).
       </p>
 
-      <div style={{display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap'}}>
+      <div style={{display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center'}}>
         <div className="form-group" style={{margin: 0, flex: 1, minWidth: 250}}>
           <div style={{position: 'relative'}}>
             <Search style={{position: 'absolute', left: 12, top: 10, color: '#9ca3af'}} size={20} />
@@ -251,13 +368,38 @@ export default function ManagePhotos() {
           </div>
         </div>
 
-        <div className="form-group" style={{margin: 0, width: 200}}>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="todos">Mostrar: Todos</option>
+        <div className="form-group" style={{margin: 0, width: 180}}>
+          <select value={filter} onChange={(e) => { setFilter(e.target.value); setPage(1); }}>
+            <option value="todos">Fotos: Todas</option>
             <option value="com">Somente com foto</option>
             <option value="sem">Somente sem foto</option>
           </select>
         </div>
+
+        <div className="form-group" style={{margin: 0, width: 180}}>
+          <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}>
+            <option value="all">Status: Todos</option>
+            <option value="active">Somente Ativos</option>
+            <option value="inactive">Somente Inativos</option>
+          </select>
+        </div>
+
+        {(search || filter !== 'todos' || filterStatus !== 'all') && (
+          <button 
+            type="button" 
+            className="btn-secondary" 
+            style={{padding: '8px 12px', fontSize: '0.85rem'}}
+            onClick={() => {
+              setSearch('');
+              setDebouncedSearch('');
+              setFilter('todos');
+              setFilterStatus('all');
+              setPage(1);
+            }}
+          >
+            Limpar Filtros
+          </button>
+        )}
       </div>
 
       <input 
@@ -276,6 +418,123 @@ export default function ManagePhotos() {
         onChange={handleBulkUpload}
       />
 
+      {selectedIds.length > 0 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#185942',
+          color: '#ffffff',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          marginBottom: 16,
+          gap: 16,
+          flexWrap: 'wrap',
+          boxShadow: '0 4px 12px rgba(24, 89, 66, 0.25)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{
+              backgroundColor: 'rgba(255,255,255,0.2)',
+              padding: '4px 10px',
+              borderRadius: 16,
+              fontWeight: 700,
+              fontSize: '0.85rem'
+            }}>
+              {selectedIds.length} produto{selectedIds.length > 1 ? 's' : ''} selecionado{selectedIds.length > 1 ? 's' : ''}
+            </span>
+            <span style={{ fontSize: '0.9rem', color: '#D7EEE2' }}>
+              Escolha uma ação em lote:
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={handleBulkActivate}
+              disabled={bulkLoading}
+              style={{
+                backgroundColor: '#22c55e',
+                color: '#ffffff',
+                border: 'none',
+                padding: '8px 14px',
+                borderRadius: '6px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: '0.85rem'
+              }}
+              title="Ativar produtos selecionados"
+            >
+              <Check size={16} /> {bulkLoading ? 'Processando...' : `Ativar (${selectedIds.length})`}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBulkDeactivate}
+              disabled={bulkLoading}
+              style={{
+                backgroundColor: '#f59e0b',
+                color: '#ffffff',
+                border: 'none',
+                padding: '8px 14px',
+                borderRadius: '6px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: '0.85rem'
+              }}
+              title="Desativar produtos selecionados"
+            >
+              <X size={16} /> {bulkLoading ? 'Processando...' : `Desativar (${selectedIds.length})`}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={bulkLoading}
+              style={{
+                backgroundColor: '#ef4444',
+                color: '#ffffff',
+                border: 'none',
+                padding: '8px 14px',
+                borderRadius: '6px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: '0.85rem'
+              }}
+              title="Excluir produtos selecionados definitivamente"
+            >
+              <Trash2 size={16} /> {bulkLoading ? 'Processando...' : `Excluir (${selectedIds.length})`}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              disabled={bulkLoading}
+              style={{
+                backgroundColor: 'transparent',
+                color: '#ffffff',
+                border: '1px solid rgba(255,255,255,0.4)',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontSize: '0.85rem'
+              }}
+            >
+              Limpar Seleção
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="admin-table-container">
         {loading ? (
           <p style={{padding: 24, textAlign: 'center'}}>Carregando...</p>
@@ -283,6 +542,15 @@ export default function ManagePhotos() {
           <table className="admin-table" style={{width: '100%', borderCollapse: 'collapse'}}>
             <thead>
               <tr>
+                <th style={{ width: 44, textAlign: 'center' }}>
+                  <input 
+                    type="checkbox"
+                    checked={products.length > 0 && products.every(p => selectedIds.includes(p.id))}
+                    onChange={handleSelectAllOnPage}
+                    title="Selecionar todos desta página"
+                    style={{ cursor: 'pointer', width: 17, height: 17, accentColor: '#185942' }}
+                  />
+                </th>
                 <th onClick={() => handleSort('external_id')} style={{cursor: 'pointer'}}>
                   ID {sortField === 'external_id' && (sortOrder === 'asc' ? <ChevronUp size={14} style={{display: 'inline'}}/> : <ChevronDown size={14} style={{display: 'inline'}}/>)}
                 </th>
@@ -313,11 +581,19 @@ export default function ManagePhotos() {
                   onDragLeave={onDragLeave}
                   onDrop={(e) => onDrop(e, p.id)}
                   style={{
-                    backgroundColor: dragHoverId === p.id ? '#f0fdf4' : 'transparent',
+                    backgroundColor: selectedIds.includes(p.id) ? '#f0fdf4' : (dragHoverId === p.id ? '#f0fdf4' : 'transparent'),
                     border: dragHoverId === p.id ? '2px dashed #22c55e' : 'none',
                     transition: 'all 0.2s ease'
                   }}
                 >
+                  <td style={{ textAlign: 'center' }}>
+                    <input 
+                      type="checkbox"
+                      checked={selectedIds.includes(p.id)}
+                      onChange={() => handleSelectOne(p.id)}
+                      style={{ cursor: 'pointer', width: 17, height: 17, accentColor: '#185942' }}
+                    />
+                  </td>
                   <td>{p.external_id || p.id}</td>
                   <td>
                     {p.image_url ? (
@@ -336,13 +612,33 @@ export default function ManagePhotos() {
                   <td>R$ {(p.price || 0).toFixed(2).replace('.',',')}</td>
                   <td>{p.stock || 0}</td>
                   <td>
-                    <span style={{
-                      backgroundColor: p.active ? '#dcfce7' : '#f3f4f6', 
-                      color: p.active ? '#166534' : '#4b5563', 
-                      padding: '2px 8px', borderRadius: 12, fontSize: '0.75rem'
-                    }}>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleActive(p)}
+                      title="Clique para alternar Ativo / Inativo"
+                      style={{
+                        backgroundColor: p.active ? '#dcfce7' : '#fee2e2', 
+                        color: p.active ? '#166534' : '#991b1b', 
+                        border: `1px solid ${p.active ? '#86efac' : '#fca5a5'}`,
+                        padding: '3px 10px', 
+                        borderRadius: 12, 
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}
+                    >
+                      <span style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        backgroundColor: p.active ? '#16a34a' : '#dc2626'
+                      }}></span>
                       {p.active ? 'Ativo' : 'Inativo'}
-                    </span>
+                    </button>
                   </td>
                   <td style={{display: 'flex', gap: 8, alignItems: 'center', height: '100%'}}>
                     <button 
@@ -368,7 +664,7 @@ export default function ManagePhotos() {
               ))}
               {sortedProducts.length === 0 && (
                 <tr>
-                  <td colSpan="8" style={{textAlign: 'center', padding: 24, color: '#6b7280'}}>
+                  <td colSpan="9" style={{textAlign: 'center', padding: 24, color: '#6b7280'}}>
                     Nenhum produto encontrado.
                   </td>
                 </tr>
