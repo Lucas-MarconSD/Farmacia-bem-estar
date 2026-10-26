@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, AlertCircle, CheckCircle, RotateCcw, History, Trash2, Database, ShieldCheck, Info } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, RotateCcw, History, Trash2, Database, PlusCircle, ArrowUpDown, Info } from 'lucide-react';
 import Papa from 'papaparse';
 import { supabase } from '../config/supabaseClient';
 
@@ -9,7 +9,10 @@ export default function ImportData() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [onlyUpdateExisting, setOnlyUpdateExisting] = useState(true);
+  
+  // Opções de importação
+  const [stockMode, setStockMode] = useState('add'); // 'add' (Somar ao estoque atual) | 'replace' (Substituir estoque)
+  const [allowCreateNew, setAllowCreateNew] = useState(true); // Permitir cadastrar novos produtos
   const [lastImport, setLastImport] = useState(null);
   const [userEmail, setUserEmail] = useState('');
   const [catalogStats, setCatalogStats] = useState({ total: 0, valid: 0, ghost: 0, loading: false });
@@ -95,6 +98,77 @@ export default function ImportData() {
     return all;
   };
 
+  // Normalizador universal de cabeçalhos de ERPs de farmácia (Linx, Trier, Digifarma, Inova, etc.)
+  const extractRowData = (rawRow) => {
+    const cleanKeys = {};
+    for (const key in rawRow) {
+      if (rawRow.hasOwnProperty(key)) {
+        const simplifiedKey = key.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+        cleanKeys[simplifiedKey] = rawRow[key];
+      }
+    }
+
+    const findVal = (exactMatches, partialMatches) => {
+      for (const e of exactMatches) {
+        if (cleanKeys[e] !== undefined && cleanKeys[e] !== null && cleanKeys[e].toString().trim() !== '') {
+          return cleanKeys[e].toString().trim();
+        }
+      }
+      for (const p of partialMatches) {
+        for (const k in cleanKeys) {
+          if (k.startsWith(p) || k.includes(p)) {
+            const v = cleanKeys[k];
+            if (v !== undefined && v !== null && v.toString().trim() !== '') {
+              return v.toString().trim();
+            }
+          }
+        }
+      }
+      return '';
+    };
+
+    const name = findVal(
+      ['descricaodoproduto', 'descricao', 'nome', 'produto', 'item', 'medicamento'],
+      ['descri', 'prod', 'nome']
+    );
+
+    let barcode = findVal(
+      ['codigodebarras', 'codbarras', 'barcode', 'ean', 'gtin', 'cbarras'],
+      ['barras', 'ean', 'gtin']
+    );
+
+    let externalId = findVal(
+      ['codigoproduto', 'codproduto', 'idproduto', 'externalid', 'referencia', 'codigo', 'cod'],
+      ['cod', 'ref']
+    );
+
+    const priceStr = findVal(
+      ['precovenda', 'prvenda', 'valordevenda', 'valorunitario', 'precoconsumidor', 'vlrunitario', 'vlrvenda', 'preco', 'valor', 'price'],
+      ['preco', 'valor', 'venda', 'prvenda']
+    );
+
+    const stockStr = findVal(
+      ['estoqueatual', 'qtdestoque', 'saldofisico', 'estoquedisponivel', 'estoque', 'quantidade', 'saldo', 'qtde', 'qtd', 'quant', 'stock'],
+      ['estoque', 'saldo', 'qtd', 'quant']
+    );
+
+    let price = parseFloat(priceStr.replace(',', '.'));
+    if (isNaN(price)) price = null;
+
+    let hasStockInRow = stockStr !== '';
+    let parsedStock = hasStockInRow ? parseInt(stockStr.replace(/[^0-9-]/g, ''), 10) : 0;
+    if (isNaN(parsedStock)) parsedStock = 0;
+
+    return {
+      name,
+      barcode,
+      externalId,
+      price,
+      hasStockInRow,
+      parsedStock
+    };
+  };
+
   const uploadFile = async (isPreview = true) => {
     if (!file) return;
     setLoading(true);
@@ -150,20 +224,7 @@ export default function ImportData() {
       const toInsertMap = new Map();
 
       rows.forEach(rawRow => {
-        const row = {};
-        for (const key in rawRow) {
-          if (rawRow.hasOwnProperty(key)) {
-            row[key.trim().toLowerCase()] = rawRow[key];
-          }
-        }
-
-        const name = (row.name || row.nome || row.descricao || row.produto || row['descrição'] || '').toString().trim();
-        let barcode = (row.barcode || row.ean || row.codigo_barras || row['código de barras'] || row.codigobarras || '').toString().trim();
-        let externalId = (row.external_id || row.codigo || row.cod || row['código'] || '').toString().trim();
-        let price = parseFloat((row.price || row.preco || row.valor || row['preço'] || '0').toString().replace(',', '.'));
-        let stock = parseInt(row.stock || row.estoque || row.quantidade || row.qtd || 0, 10);
-        if (isNaN(stock)) stock = 0;
-        if (isNaN(price)) price = 0;
+        const { name, barcode, externalId, price, hasStockInRow, parsedStock } = extractRowData(rawRow);
 
         if (!name) {
           summary.invalidRow++;
@@ -196,18 +257,9 @@ export default function ImportData() {
           }
         }
 
-        let active = existing ? (existing.active ?? true) : true;
-        if (row.active !== undefined || row.ativo !== undefined || row.status !== undefined) {
-          const val = (row.active ?? row.ativo ?? row.status).toString().trim().toLowerCase();
-          if (['0', 'false', 'inativo', 'desativado', 'não', 'nao'].includes(val)) {
-            active = false;
-          } else if (['1', 'true', 'ativo', 'sim'].includes(val)) {
-            active = true;
-          }
-        }
-
         if (!existing) {
-          if (onlyUpdateExisting) {
+          // PRODUTO NOVO
+          if (!allowCreateNew) {
             summary.ignoredNew++;
           } else {
             const insertKey = barcode ? `ean:${barcode}` : `name:${name.toLowerCase().trim()}`;
@@ -215,34 +267,47 @@ export default function ImportData() {
               summary.newProducts++;
               toInsertMap.set(insertKey, {
                 name,
-                barcode,
+                barcode: barcode || null,
                 external_id: externalId || null,
                 price: price || null,
-                stock,
-                active
+                stock: hasStockInRow ? parsedStock : 0,
+                active: true,
+                category_id: 1 // Medicamentos como padrão
               });
             } else {
-              // Se o mesmo novo produto repetiu na planilha, atualiza o item de inserção com dados mais recentes
+              // Se repetiu na planilha, soma ou atualiza
+              const prev = toInsertMap.get(insertKey);
               toInsertMap.set(insertKey, {
-                ...toInsertMap.get(insertKey),
-                price: price || toInsertMap.get(insertKey).price,
-                stock,
-                active
+                ...prev,
+                price: price || prev.price,
+                stock: stockMode === 'add' ? (prev.stock + parsedStock) : parsedStock,
+                active: true
               });
             }
           }
         } else {
+          // PRODUTO EXISTENTE
           let changed = false;
 
-          if (stock > existing.stock) {
+          // Cálculo do novo estoque conforme modo escolhido
+          let finalStock = existing.stock || 0;
+          if (hasStockInRow) {
+            if (stockMode === 'add') {
+              finalStock = (existing.stock || 0) + parsedStock;
+            } else {
+              finalStock = parsedStock;
+            }
+          }
+
+          if (finalStock > existing.stock) {
             summary.stockIncreased++;
             changed = true;
-          } else if (stock < existing.stock) {
+          } else if (finalStock < existing.stock) {
             summary.stockDecreased++;
             changed = true;
           }
 
-          if (price !== existing.price) {
+          if (price && price !== existing.price) {
             summary.priceChanged++;
             changed = true;
           }
@@ -256,14 +321,21 @@ export default function ImportData() {
             summary.unchanged++;
           }
 
-          // Desduplicação estrita por existing.id (garante que nenhum produto seja repetido no mesmo lote de upsert do Postgres)
+          // Desduplicação estrita por existing.id (garante que nenhum produto seja repetido no mesmo lote do Postgres)
           const prevUpdate = toUpdateMap.get(existing.id);
+          const currentAccumulatedStock = prevUpdate ? prevUpdate.stock : (existing.stock || 0);
+
+          let updatedStock = finalStock;
+          if (prevUpdate && hasStockInRow && stockMode === 'add') {
+            updatedStock = currentAccumulatedStock + parsedStock;
+          }
+
           toUpdateMap.set(existing.id, {
             ...existing,
             ...(prevUpdate || {}),
             price: price || (prevUpdate ? prevUpdate.price : existing.price),
-            stock,
-            active,
+            stock: updatedStock,
+            active: true,
             ...(barcode && !existing.barcode ? { barcode } : {}),
             _originalExisting: prevUpdate ? prevUpdate._originalExisting : {
               id: existing.id,
@@ -280,7 +352,11 @@ export default function ImportData() {
       const toInsertList = Array.from(toInsertMap.values());
 
       if (isPreview) {
-        setPreview(summary);
+        setPreview({
+          ...summary,
+          toUpdateCount: toUpdateList.length,
+          toInsertCount: toInsertList.length
+        });
       } else {
         // EXECUÇÃO REAL COM CAPTURA DE SNAPSHOT PARA ROLLBACK
         const previousStates = toUpdateList.map(item => item._originalExisting);
@@ -325,7 +401,8 @@ export default function ImportData() {
             totalProcessed: rows.length,
             newCreated: newlyCreatedIds.length,
             updated: previousStates.length,
-            ignored: summary.ignoredNew
+            ignored: summary.ignoredNew,
+            mode: stockMode === 'add' ? 'Somar ao estoque' : 'Substituir estoque'
           }
         };
 
@@ -336,7 +413,7 @@ export default function ImportData() {
           console.warn('Erro ao salvar snapshot de rollback:', e);
         }
 
-        setSuccess(`Atualização de estoque realizada com sucesso! ${toUpdateList.length} produtos atualizados${newlyCreatedIds.length > 0 ? ` e ${newlyCreatedIds.length} criados` : ''}.`);
+        setSuccess(`Atualização de estoque realizada com sucesso! ${toUpdateList.length} produtos atualizados${newlyCreatedIds.length > 0 ? ` e ${newlyCreatedIds.length} novos produtos adicionados ao catálogo` : ''}.`);
         setPreview(null);
         setFile(null);
         if (document.getElementById('file-upload')) {
@@ -407,11 +484,11 @@ export default function ImportData() {
     setLoading(false);
   };
 
-  // LIMPEZA SEGURA DOS 3.071 PRODUTOS FANTASMAS DE 09/10
+  // LIMPEZA SEGURA DOS PRODUTOS FANTASMAS
   const handleCleanGhostProducts = async () => {
     if (catalogStats.ghost === 0) return;
 
-    const confirmMsg = `Atenção: Essa ação irá excluir os ${catalogStats.ghost} produtos antigos (cadastrados em 09/10) que estão com preço nulo e estoque zerado.\n\n` +
+    const confirmMsg = `Atenção: Essa ação irá excluir os ${catalogStats.ghost} produtos antigos que estão com preço nulo e estoque zerado.\n\n` +
       `Os seus ${catalogStats.valid} produtos reais (com preço e estoque válidos) NÃO serão afetados.\n\n` +
       `Deseja prosseguir com a limpeza e deixar apenas os produtos reais na loja?`;
 
@@ -421,7 +498,6 @@ export default function ImportData() {
     setError('');
 
     try {
-      // Busca os IDs dos produtos fantasmas
       let ghostIds = [];
       let from = 0;
       const step = 1000;
@@ -439,7 +515,6 @@ export default function ImportData() {
         from += step;
       }
 
-      // Deleta em lotes
       for (let i = 0; i < ghostIds.length; i += 200) {
         const batch = ghostIds.slice(i, i + 200);
         const { error: delErr } = await supabase.from('products').delete().in('id', batch);
@@ -495,7 +570,7 @@ export default function ImportData() {
           <div>
             <h1 style={{ margin: 0 }}>Atualizar Estoque</h1>
             <p style={{ margin: '4px 0 0 0', color: '#6b7280', fontSize: '0.9rem' }}>
-              Importe a planilha de estoque da farmácia com proteção contra duplicatas e opção de desfazer.
+              Importe ou atualize produtos e estoque com suporte a soma de saldo, cadastro automático e opção de desfazer.
             </p>
           </div>
         </div>
@@ -543,9 +618,9 @@ export default function ImportData() {
                 </div>
                 <div style={{ marginTop: 8, color: '#78350f', fontSize: '0.9rem', lineHeight: '1.5' }}>
                   <div><strong>Arquivo:</strong> {lastImport.fileName}</div>
-                  <div><strong>Data do Envio:</strong> {lastImport.timestamp} • <strong>Realizado por:</strong> {lastImport.userEmail}</div>
+                  <div><strong>Data:</strong> {lastImport.timestamp} • <strong>Usuário:</strong> {lastImport.userEmail}</div>
                   <div style={{ marginTop: 4, color: '#b45309' }}>
-                    <strong>Resumo:</strong> {lastImport.summary?.updated || 0} produtos atualizados • {lastImport.createdIds?.length || 0} novos produtos inseridos
+                    <strong>Resumo:</strong> {lastImport.summary?.updated || 0} produtos atualizados • {lastImport.createdIds?.length || 0} novos produtos inseridos ({lastImport.summary?.mode || 'Atualização'})
                   </div>
                 </div>
               </div>
@@ -580,10 +655,78 @@ export default function ImportData() {
         {/* ÁREA DE IMPORTAÇÃO */}
         <div className="import-steps" style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: 20 }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: '#111827' }}>
-            1. Selecionar Arquivo do Sistema de Estoque
+            1. Configurar Modo de Importação & Estoque
+          </h3>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginBottom: 20 }}>
+            {/* CONFIGURAÇÃO DO ESTOQUE (SOMAR OU SUBSTITUIR) */}
+            <div style={{
+              backgroundColor: '#f0fdf4',
+              border: '1px solid #bbf7d0',
+              borderRadius: 8,
+              padding: 16
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#166534', fontWeight: 700, fontSize: '0.95rem', marginBottom: 10 }}>
+                <ArrowUpDown size={18} />
+                Como tratar o estoque da planilha?
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#15803d', fontSize: '0.9rem', marginBottom: 8 }}>
+                <input
+                  type="radio"
+                  name="stockMode"
+                  value="add"
+                  checked={stockMode === 'add'}
+                  onChange={() => { setStockMode('add'); setPreview(null); }}
+                  style={{ accentColor: '#16a34a' }}
+                />
+                <span><strong>Somar ao estoque atual</strong> (Recomendado para chegada de mercadorias / compras)</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#15803d', fontSize: '0.9rem' }}>
+                <input
+                  type="radio"
+                  name="stockMode"
+                  value="replace"
+                  checked={stockMode === 'replace'}
+                  onChange={() => { setStockMode('replace'); setPreview(null); }}
+                  style={{ accentColor: '#16a34a' }}
+                />
+                <span><strong>Substituir estoque</strong> (Balanço geral / Inventário físico completo)</span>
+              </label>
+            </div>
+
+            {/* CONFIGURAÇÃO DE PRODUTOS NOVOS */}
+            <div style={{
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: 8,
+              padding: 16
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#1e40af', fontWeight: 700, fontSize: '0.95rem', marginBottom: 10 }}>
+                <PlusCircle size={18} />
+                Produtos não encontrados no site:
+              </div>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', color: '#1d4ed8', fontSize: '0.9rem' }}>
+                <input
+                  type="checkbox"
+                  checked={allowCreateNew}
+                  onChange={(e) => { setAllowCreateNew(e.target.checked); setPreview(null); }}
+                  style={{ width: 17, height: 17, marginTop: 2, accentColor: '#2563eb' }}
+                />
+                <span>
+                  <strong>Cadastrar novos produtos na loja virtual</strong>
+                  <span style={{ display: 'block', fontSize: '0.8rem', color: '#3b82f6', marginTop: 2 }}>
+                    Se a planilha contiver itens que ainda não existem no site, eles serão inseridos e aparecerão no catálogo.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: '#111827' }}>
+            2. Selecionar Arquivo (.CSV ou Excel)
           </h3>
           <p style={{ margin: '0 0 16px 0', color: '#4b5563', fontSize: '0.9rem' }}>
-            Exporte o arquivo em formato <strong>.CSV</strong> do seu sistema (Linx, Trier, Digifarma, Inova, etc.) e selecione abaixo:
+            Selecione a planilha exportada pelo seu sistema de farmácia (aceita colunas como <em>PRODUTO, DESCRIÇÃO, EAN, CÓDIGO BARRAS, PREÇO, ESTOQUE, SALDO, QTDE</em>):
           </p>
 
           <input 
@@ -601,35 +744,6 @@ export default function ImportData() {
             }}
           />
 
-          {/* PROTEÇÃO: APENAS ATUALIZAR ITENS EXISTENTES (NÃO DUPLICAR OU CRIAR 11 MIL ITENS) */}
-          <div style={{
-            marginTop: 16,
-            backgroundColor: '#f0fdf4',
-            border: '1px solid #bbf7d0',
-            borderRadius: 8,
-            padding: '12px 16px',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 12
-          }}>
-            <input
-              type="checkbox"
-              id="only-update-existing"
-              checked={onlyUpdateExisting}
-              onChange={(e) => {
-                setOnlyUpdateExisting(e.target.checked);
-                setPreview(null);
-              }}
-              style={{ width: 18, height: 18, cursor: 'pointer', marginTop: 2, accentColor: '#16a34a' }}
-            />
-            <label htmlFor="only-update-existing" style={{ cursor: 'pointer', color: '#166534', fontSize: '0.925rem' }}>
-              <strong>Apenas atualizar produtos já cadastrados no site (Recomendado)</strong>
-              <div style={{ fontWeight: 400, fontSize: '0.825rem', color: '#15803d', marginTop: 2 }}>
-                Se a planilha do sistema tiver milhares de itens gerais de laboratório, eles serão ignorados e <strong>NÃO</strong> serão adicionados à loja virtual, garantindo que nada seja duplicado nem itens indesejados sejam criados.
-              </div>
-            </label>
-          </div>
-
           {file && !preview && !success && (
             <div style={{ marginTop: 20 }}>
               <button 
@@ -639,7 +753,7 @@ export default function ImportData() {
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
               >
                 <Upload size={18} />
-                {loading ? 'Analisando...' : 'Gerar Prévia Segura'}
+                {loading ? 'Analisando...' : 'Gerar Prévia da Planilha'}
               </button>
             </div>
           )}
@@ -648,52 +762,60 @@ export default function ImportData() {
         {/* PRÉVIA INTELIGENTE */}
         {preview && (
           <div className="import-preview" style={{ marginTop: 24 }}>
-            <h3 style={{ marginTop: 0, color: '#111827' }}>Resumo Inteligente da Sincronização</h3>
+            <h3 style={{ marginTop: 0, color: '#111827' }}>
+              Resumo da Importação ({stockMode === 'add' ? 'Modo: Somar ao Estoque Atual' : 'Modo: Substituir Estoque'})
+            </h3>
             <ul>
               <li>
-                <span>Total de registros analisados na planilha:</span>
+                <span>Total de linhas analisadas na planilha:</span>
                 <strong>{preview.totalAnalyzed}</strong>
               </li>
-              {onlyUpdateExisting ? (
+              <li>
+                <span style={{ color: '#2563eb', fontWeight: 600 }}>Produtos existentes que serão atualizados:</span>
+                <strong style={{ color: '#2563eb' }}>{preview.toUpdateCount}</strong>
+              </li>
+              {allowCreateNew ? (
                 <li>
-                  <span style={{ color: '#6b7280' }}>Itens novos na planilha (Ignorados para segurança):</span>
-                  <strong style={{ color: '#6b7280' }}>{preview.ignoredNew}</strong>
+                  <span style={{ color: '#059669', fontWeight: 600 }}>Novos produtos que SERÃO ADICIONADOS ao catálogo:</span>
+                  <strong style={{ color: '#059669' }}>{preview.toInsertCount}</strong>
                 </li>
               ) : (
                 <li>
-                  <span style={{ color: '#059669' }}>Novos produtos detectados (Serão criados):</span>
-                  <strong style={{ color: '#059669'}}>{preview.newProducts}</strong>
+                  <span style={{ color: '#6b7280' }}>Itens novos na planilha (Ignorados):</span>
+                  <strong style={{ color: '#6b7280' }}>{preview.ignoredNew}</strong>
                 </li>
               )}
               <li>
-                <span style={{ color: '#2563eb' }}>Aumentos de Estoque:</span>
-                <strong style={{ color: '#2563eb' }}>{preview.stockIncreased}</strong>
+                <span style={{ color: '#059669' }}>Produtos com Aumento de Estoque:</span>
+                <strong style={{ color: '#059669' }}>{preview.stockIncreased}</strong>
               </li>
               <li>
-                <span style={{ color: '#dc2626' }}>Reduções de Estoque (Baixas):</span>
+                <span style={{ color: '#dc2626' }}>Produtos com Redução de Estoque:</span>
                 <strong style={{ color: '#dc2626' }}>{preview.stockDecreased}</strong>
               </li>
               <li>
-                <span style={{ color: '#7e22ce' }}>Preços / Nomes alterados:</span>
+                <span style={{ color: '#7e22ce' }}>Preços ou Nomes alterados:</span>
                 <strong style={{ color: '#7e22ce' }}>{preview.priceChanged + preview.nameChanged}</strong>
               </li>
               <li>
-                <span style={{ color: '#4b5563' }}>Produtos Inalterados (Estoque e preço idênticos):</span>
+                <span style={{ color: '#4b5563' }}>Produtos com saldo idêntico (Inalterados):</span>
                 <strong style={{ color: '#4b5563' }}>{preview.unchanged}</strong>
               </li>
-              <li>
-                <span style={{ color: '#eab308' }}>Produtos sem preço na planilha (Revisão):</span>
-                <strong style={{ color: '#eab308' }}>{preview.review}</strong>
-              </li>
+              {preview.review > 0 && (
+                <li>
+                  <span style={{ color: '#eab308' }}>Produtos sem preço na planilha (Manterão preço atual):</span>
+                  <strong style={{ color: '#eab308' }}>{preview.review}</strong>
+                </li>
+              )}
             </ul>
 
             {(preview.invalidRow > 0 || preview.invalidEan > 0 || preview.duplicateEan > 0) && (
               <div style={{ marginTop: 16, padding: 12, backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6 }}>
                 <h4 style={{ margin: '0 0 8px 0', color: '#b91c1c' }}>Avisos detectados no arquivo:</h4>
                 <ul style={{ margin: 0, paddingLeft: 20, color: '#b91c1c' }}>
-                  {preview.invalidRow > 0 && <li><strong>{preview.invalidRow}</strong> linhas sem nome de produto.</li>}
+                  {preview.invalidRow > 0 && <li><strong>{preview.invalidRow}</strong> linhas sem nome de produto foram desconsideradas.</li>}
                   {preview.invalidEan > 0 && <li><strong>{preview.invalidEan}</strong> códigos de barras com caracteres inválidos.</li>}
-                  {preview.duplicateEan > 0 && <li><strong>{preview.duplicateEan}</strong> códigos de barras duplicados na mesma planilha.</li>}
+                  {preview.duplicateEan > 0 && <li><strong>{preview.duplicateEan}</strong> códigos de barras repetidos na planilha (dados consolidados automaticamente).</li>}
                 </ul>
               </div>
             )}
@@ -705,7 +827,7 @@ export default function ImportData() {
                 disabled={loading}
               >
                 <CheckCircle size={18} />
-                {loading ? 'Aplicando...' : 'Confirmar Sincronização'}
+                {loading ? 'Aplicando...' : 'Confirmar e Aplicar ao Catálogo'}
               </button>
               <button 
                 className="btn-secondary" 
@@ -732,9 +854,8 @@ export default function ImportData() {
               <div>
                 <h3 style={{ margin: 0, fontSize: '1rem', color: '#1e293b' }}>Diagnóstico Atual do Catálogo</h3>
                 <p style={{ margin: '2px 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-                  Total no banco: <strong>{catalogStats.total}</strong> produtos | 
-                  Válidos (com preço/estoque): <strong style={{ color: '#059669' }}>{catalogStats.valid}</strong> | 
-                  Itens antigos sem preço (09/10): <strong style={{ color: '#e11d48' }}>{catalogStats.ghost}</strong>
+                  Total cadastrado no banco: <strong style={{ color: '#059669' }}>{catalogStats.total}</strong> produtos reais ativos | 
+                  Com estoque disponível: <strong style={{ color: '#2563eb' }}>{catalogStats.valid}</strong>
                 </p>
               </div>
             </div>
@@ -756,7 +877,6 @@ export default function ImportData() {
                   alignItems: 'center',
                   gap: 6
                 }}
-                title="Remove os 3.071 produtos antigos sem preço mantendo os 1.077 reais"
               >
                 <Trash2 size={15} />
                 Limpar {catalogStats.ghost} Itens Antigos sem Preço
