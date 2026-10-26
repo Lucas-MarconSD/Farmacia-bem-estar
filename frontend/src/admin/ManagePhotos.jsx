@@ -12,6 +12,7 @@ export default function ManagePhotos() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [globalWithoutPhoto, setGlobalWithoutPhoto] = useState(0);
   const limit = 50;
   
   const [sortField, setSortField] = useState('name');
@@ -35,8 +36,23 @@ export default function ManagePhotos() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  const fetchGlobalPendingCount = async () => {
+    try {
+      const { count } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true })
+        .or('image_url.is.null,image_url.eq.""');
+      setGlobalWithoutPhoto(count || 0);
+    } catch (e) {
+      // ignore
+    }
+  };
+
   const getDbSortColumn = (field) => {
     switch (field) {
+      case 'photo':
+      case 'image_url':
+        return 'image_url';
       case 'active':
       case 'status':
         return 'active';
@@ -78,10 +94,17 @@ export default function ManagePhotos() {
     }
 
     const dbSort = getDbSortColumn(sortField);
-    query = query.order(dbSort, { ascending: sortOrder === 'asc', nullsFirst: false });
+    if (dbSort === 'image_url') {
+      // sortOrder === 'asc': sem foto primeiro (nullsFirst = true)
+      // sortOrder === 'desc': com foto primeiro (nullsFirst = false)
+      query = query.order('image_url', { ascending: sortOrder === 'desc', nullsFirst: sortOrder === 'asc' });
+    } else {
+      query = query.order(dbSort, { ascending: sortOrder === 'asc', nullsFirst: false });
+    }
 
+    // Ordenação secundária estável para que itens sem foto ou com mesmo preço respeitem A-Z / Z-A
     if (dbSort !== 'name') {
-      query = query.order('name', { ascending: true });
+      query = query.order('name', { ascending: sortOrder === 'desc' ? false : true });
     }
 
     const from = (page - 1) * limit;
@@ -102,6 +125,7 @@ export default function ManagePhotos() {
       console.error('Erro ao buscar produtos para fotos:', error);
     }
     setLoading(false);
+    fetchGlobalPendingCount();
   };
 
   useEffect(() => {
@@ -369,9 +393,32 @@ export default function ManagePhotos() {
       <div className="admin-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
         <div style={{display: 'flex', alignItems: 'center', gap: 16}}>
           <h1 style={{margin: 0}}>Gerenciar Fotos</h1>
-          {totalWithoutPhoto > 0 && (
-            <div style={{color: '#d97706', backgroundColor: '#fef3c7', padding: '6px 12px', borderRadius: 16, fontSize: '0.85rem', fontWeight: 600}}>
-              {totalWithoutPhoto} sem foto
+          {globalWithoutPhoto > 0 ? (
+            <button
+              type="button"
+              onClick={() => { setFilter('sem'); setPage(1); }}
+              title="Clique para filtrar apenas produtos pendentes sem foto"
+              style={{
+                color: '#d97706', 
+                backgroundColor: '#fef3c7', 
+                border: '1px solid #fde68a',
+                padding: '6px 14px', 
+                borderRadius: 16, 
+                fontSize: '0.85rem', 
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <span>⚠️ {globalWithoutPhoto} sem foto</span>
+              <span style={{ fontSize: '0.75rem', textDecoration: 'underline' }}>(Ver pendentes)</span>
+            </button>
+          ) : (
+            <div style={{color: '#166534', backgroundColor: '#dcfce7', padding: '6px 14px', borderRadius: 16, fontSize: '0.85rem', fontWeight: 600}}>
+              ✅ Todas as fotos cadastradas!
             </div>
           )}
         </div>
@@ -400,11 +447,11 @@ export default function ManagePhotos() {
           </div>
         </div>
 
-        <div className="form-group" style={{margin: 0, width: 180}}>
+        <div className="form-group" style={{margin: 0, width: 230}}>
           <select value={filter} onChange={(e) => { setFilter(e.target.value); setPage(1); }}>
             <option value="todos">Fotos: Todas</option>
-            <option value="com">Somente com foto</option>
-            <option value="sem">Somente sem foto</option>
+            <option value="sem">⚠️ Somente Sem Foto (Pendentes)</option>
+            <option value="com">✅ Somente Com Foto</option>
           </select>
         </div>
 
@@ -586,9 +633,11 @@ export default function ManagePhotos() {
                 <th onClick={() => handleSort('external_id')} style={{cursor: 'pointer'}}>
                   ID {sortField === 'external_id' && (sortOrder === 'asc' ? <ChevronUp size={14} style={{display: 'inline'}}/> : <ChevronDown size={14} style={{display: 'inline'}}/>)}
                 </th>
-                <th style={{width: 60}}>Foto</th>
-                <th onClick={() => handleSort('name')} style={{cursor: 'pointer'}}>
-                  Produto {sortField === 'name' && (sortOrder === 'asc' ? <ChevronUp size={14} style={{display: 'inline'}}/> : <ChevronDown size={14} style={{display: 'inline'}}/>)}
+                <th onClick={() => handleSort('photo')} style={{cursor: 'pointer', userSelect: 'none', minWidth: 100}} title="Ordenar por fotos (Sem foto primeiro / Com foto primeiro)">
+                  Foto {sortField === 'photo' && (sortOrder === 'asc' ? <span style={{fontSize: '0.75rem', fontWeight: 600}}>(Sem foto 1º)</span> : <span style={{fontSize: '0.75rem', fontWeight: 600}}>(Com foto 1º)</span>)} {sortField === 'photo' && (sortOrder === 'asc' ? <ChevronUp size={14} style={{display: 'inline', verticalAlign: 'middle'}}/> : <ChevronDown size={14} style={{display: 'inline', verticalAlign: 'middle'}}/>)}
+                </th>
+                <th onClick={() => handleSort('name')} style={{cursor: 'pointer', userSelect: 'none'}} title="Ordenar alfabeticamente A-Z ou Z-A">
+                  Produto {sortField === 'name' ? (sortOrder === 'asc' ? '(A-Z)' : '(Z-A)') : ''} {sortField === 'name' && (sortOrder === 'asc' ? <ChevronUp size={14} style={{display: 'inline', verticalAlign: 'middle'}}/> : <ChevronDown size={14} style={{display: 'inline', verticalAlign: 'middle'}}/>)}
                 </th>
                 <th onClick={() => handleSort('categoryName')} style={{cursor: 'pointer'}}>
                   Categoria {sortField === 'categoryName' && (sortOrder === 'asc' ? <ChevronUp size={14} style={{display: 'inline'}}/> : <ChevronDown size={14} style={{display: 'inline'}}/>)}
