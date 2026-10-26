@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Image as ImageIcon, UploadCloud, ChevronUp, ChevronDown, Upload, Trash2, Check, X } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
+import { optimizeImage } from '../utils/imageOptimizer';
 
 export default function ManagePhotos() {
   const [products, setProducts] = useState([]);
@@ -248,14 +249,15 @@ export default function ManagePhotos() {
 
   const uploadFile = async (file, productId) => {
     try {
-      const ext = file.name.split('.').pop();
+      const optimizedFile = await optimizeImage(file);
+      const ext = optimizedFile.name.split('.').pop();
       const fileName = `product-${productId}-${Date.now()}.${ext}`;
       
       const { error: uploadError } = await supabase.storage
         .from('product-images')
-        .upload(fileName, file, { 
+        .upload(fileName, optimizedFile, { 
           upsert: true,
-          contentType: file.type || 'image/jpeg'
+          contentType: optimizedFile.type || 'image/webp'
         });
 
       if (uploadError) {

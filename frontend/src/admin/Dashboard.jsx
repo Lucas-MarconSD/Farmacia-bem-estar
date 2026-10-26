@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Edit2, Search, Trash2, Check, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { supabase } from '../config/supabaseClient';
+import { optimizeImage } from '../utils/imageOptimizer';
 
 export default function Dashboard() {
   const [products, setProducts] = useState([]);
@@ -259,13 +260,14 @@ export default function Dashboard() {
     let finalImageUrl = payload.image_url;
 
     if (imageFile) {
-      const ext = imageFile.name.split('.').pop();
+      const optimizedFile = await optimizeImage(imageFile);
+      const ext = optimizedFile.name.split('.').pop();
       const fileName = `product-${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from('product-images')
-        .upload(fileName, imageFile, {
+        .upload(fileName, optimizedFile, {
           upsert: true,
-          contentType: imageFile.type || 'image/jpeg'
+          contentType: optimizedFile.type || 'image/webp'
         });
       
       if (!uploadError) {
