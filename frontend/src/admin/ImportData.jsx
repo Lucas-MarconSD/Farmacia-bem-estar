@@ -146,8 +146,8 @@ export default function ImportData() {
       };
 
       const eanSet = new Set();
-      const toUpdate = [];
-      const toInsert = [];
+      const toUpdateMap = new Map();
+      const toInsertMap = new Map();
 
       rows.forEach(rawRow => {
         const row = {};
@@ -210,15 +210,26 @@ export default function ImportData() {
           if (onlyUpdateExisting) {
             summary.ignoredNew++;
           } else {
-            summary.newProducts++;
-            toInsert.push({
-              name,
-              barcode,
-              external_id: externalId || null,
-              price: price || null,
-              stock,
-              active
-            });
+            const insertKey = barcode ? `ean:${barcode}` : `name:${name.toLowerCase().trim()}`;
+            if (!toInsertMap.has(insertKey)) {
+              summary.newProducts++;
+              toInsertMap.set(insertKey, {
+                name,
+                barcode,
+                external_id: externalId || null,
+                price: price || null,
+                stock,
+                active
+              });
+            } else {
+              // Se o mesmo novo produto repetiu na planilha, atualiza o item de inserção com dados mais recentes
+              toInsertMap.set(insertKey, {
+                ...toInsertMap.get(insertKey),
+                price: price || toInsertMap.get(insertKey).price,
+                stock,
+                active
+              });
+            }
           }
         } else {
           let changed = false;
@@ -245,13 +256,16 @@ export default function ImportData() {
             summary.unchanged++;
           }
 
-          toUpdate.push({
+          // Desduplicação estrita por existing.id (garante que nenhum produto seja repetido no mesmo lote de upsert do Postgres)
+          const prevUpdate = toUpdateMap.get(existing.id);
+          toUpdateMap.set(existing.id, {
             ...existing,
-            price: price || existing.price,
+            ...(prevUpdate || {}),
+            price: price || (prevUpdate ? prevUpdate.price : existing.price),
             stock,
             active,
             ...(barcode && !existing.barcode ? { barcode } : {}),
-            _originalExisting: {
+            _originalExisting: prevUpdate ? prevUpdate._originalExisting : {
               id: existing.id,
               name: existing.name,
               stock: existing.stock,
@@ -262,16 +276,19 @@ export default function ImportData() {
         }
       });
 
+      const toUpdateList = Array.from(toUpdateMap.values());
+      const toInsertList = Array.from(toInsertMap.values());
+
       if (isPreview) {
         setPreview(summary);
       } else {
         // EXECUÇÃO REAL COM CAPTURA DE SNAPSHOT PARA ROLLBACK
-        const previousStates = toUpdate.map(item => item._originalExisting);
+        const previousStates = toUpdateList.map(item => item._originalExisting);
         const newlyCreatedIds = [];
 
-        // 1. Atualiza produtos existentes em lotes de 500
-        for (let i = 0; i < toUpdate.length; i += 500) {
-          const batch = toUpdate.slice(i, i + 500).map(item => {
+        // 1. Atualiza produtos existentes em lotes de 200 (garantidamente com IDs únicos)
+        for (let i = 0; i < toUpdateList.length; i += 200) {
+          const batch = toUpdateList.slice(i, i + 200).map(item => {
             const clean = { ...item };
             delete clean._originalExisting;
             delete clean.categories;
@@ -281,10 +298,10 @@ export default function ImportData() {
           if (upsertErr) throw upsertErr;
         }
 
-        // 2. Insere novos produtos se permitido
-        if (toInsert.length > 0) {
-          for (let i = 0; i < toInsert.length; i += 500) {
-            const batch = toInsert.slice(i, i + 500);
+        // 2. Insere novos produtos se permitido (desduplicados)
+        if (toInsertList.length > 0) {
+          for (let i = 0; i < toInsertList.length; i += 200) {
+            const batch = toInsertList.slice(i, i + 200);
             const { data: inserted, error: insertErr } = await supabase
               .from('products')
               .insert(batch)
@@ -319,7 +336,7 @@ export default function ImportData() {
           console.warn('Erro ao salvar snapshot de rollback:', e);
         }
 
-        setSuccess(`Atualização de estoque realizada com sucesso! ${toUpdate.length} produtos atualizados${newlyCreatedIds.length > 0 ? ` e ${newlyCreatedIds.length} criados` : ''}.`);
+        setSuccess(`Atualização de estoque realizada com sucesso! ${toUpdateList.length} produtos atualizados${newlyCreatedIds.length > 0 ? ` e ${newlyCreatedIds.length} criados` : ''}.`);
         setPreview(null);
         setFile(null);
         if (document.getElementById('file-upload')) {
@@ -362,10 +379,17 @@ export default function ImportData() {
         }
       }
 
-      // 2. Restaura o estoque, preço e status dos produtos alterados
+      // 2. Restaura o estoque, preço e status dos produtos alterados (desduplicados por ID)
       if (numUpdated > 0) {
-        for (let i = 0; i < lastImport.previousStates.length; i += 200) {
-          const batch = lastImport.previousStates.slice(i, i + 200);
+        const uniquePrevMap = new Map();
+        (lastImport.previousStates || []).forEach(p => {
+          if (p && p.id && !uniquePrevMap.has(p.id)) {
+            uniquePrevMap.set(p.id, p);
+          }
+        });
+        const cleanPrevious = Array.from(uniquePrevMap.values());
+        for (let i = 0; i < cleanPrevious.length; i += 200) {
+          const batch = cleanPrevious.slice(i, i + 200);
           const { error: restoreErr } = await supabase.from('products').upsert(batch);
           if (restoreErr) throw restoreErr;
         }
