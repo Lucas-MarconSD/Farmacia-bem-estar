@@ -263,11 +263,17 @@ export default function Dashboard() {
       const fileName = `product-${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from('product-images')
-        .upload(fileName, imageFile);
+        .upload(fileName, imageFile, {
+          upsert: true,
+          contentType: imageFile.type || 'image/jpeg'
+        });
       
       if (!uploadError) {
         const { data: publicUrlData } = supabase.storage.from('product-images').getPublicUrl(fileName);
         finalImageUrl = publicUrlData.publicUrl;
+      } else {
+        console.error('Erro no upload da foto:', uploadError);
+        alert('Atenção: A foto não pôde ser salva no Storage (' + uploadError.message + '). Verifique as políticas de Storage (RLS) no Supabase.');
       }
     }
     

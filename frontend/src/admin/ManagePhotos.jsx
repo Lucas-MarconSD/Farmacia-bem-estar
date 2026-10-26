@@ -229,9 +229,16 @@ export default function ManagePhotos() {
       
       const { error: uploadError } = await supabase.storage
         .from('product-images')
-        .upload(fileName, file, { upsert: true });
+        .upload(fileName, file, { 
+          upsert: true,
+          contentType: file.type || 'image/jpeg'
+        });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('Erro de upload no Storage:', uploadError);
+        alert(`Erro ao enviar foto para o Storage: ${uploadError.message}\n\nMotivo comum: Falta de permissão nas Políticas de Storage (RLS) no painel do Supabase.`);
+        return false;
+      }
 
       const { data: publicUrlData } = supabase.storage
         .from('product-images')
@@ -244,12 +251,17 @@ export default function ManagePhotos() {
         .update({ image_url: imageUrl })
         .eq('id', productId);
 
-      if (dbError) throw dbError;
+      if (dbError) {
+        console.error('Erro ao salvar URL da imagem:', dbError);
+        alert('Foto enviada, mas erro ao associar ao produto: ' + dbError.message);
+        return false;
+      }
 
       setProducts(prev => prev.map(p => p.id === productId ? { ...p, image_url: imageUrl } : p));
       return true;
     } catch (err) {
       console.error('Erro ao fazer upload da imagem:', err);
+      alert('Erro inesperado no upload: ' + err.message);
       return false;
     }
   };
@@ -276,39 +288,59 @@ export default function ManagePhotos() {
       setProducts(prev => prev.map(p => p.id === productId ? { ...p, image_url: null } : p));
     } catch (err) {
       console.error('Erro ao remover foto:', err);
-      alert('Erro de conexão ao remover foto.');
+      alert('Erro ao remover foto: ' + err.message);
     }
   };
 
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file || !uploadingId) return;
-    setUploadingId(uploadingId);
-    await uploadFile(file, uploadingId);
+    const targetId = uploadingId;
+    await uploadFile(file, targetId);
     e.target.value = '';
     setUploadingId(null);
   };
 
   const handleBulkUpload = async (e) => {
-    const files = e.target.files;
+    const files = Array.from(e.target.files);
     if (!files.length) return;
     setBulkUploading(true);
 
     let successCount = 0;
+    let notFoundCount = 0;
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const filename = file.name.split('.')[0]; 
+      const filename = file.name.split('.')[0].trim(); 
       
-      const product = products.find(p => p.external_id && p.external_id.toString() === filename);
-      if (product) {
-        const success = await uploadFile(file, product.id);
+      // Procura primeiro nos produtos da página atual
+      let targetProduct = products.find(p => p.external_id && p.external_id.toString() === filename);
+
+      // Se não estiver na página atual, busca no banco pelo external_id
+      if (!targetProduct) {
+        const { data: foundProd } = await supabase
+          .from('products')
+          .select('id, external_id')
+          .eq('external_id', filename)
+          .maybeSingle();
+
+        if (foundProd) {
+          targetProduct = foundProd;
+        }
+      }
+
+      if (targetProduct) {
+        const success = await uploadFile(file, targetProduct.id);
         if (success) successCount++;
+      } else {
+        notFoundCount++;
       }
     }
     
-    alert(`Processamento em lote concluído: ${successCount} imagem(ns) associada(s) com sucesso.`);
+    alert(`Processamento em lote concluído:\n✅ ${successCount} imagem(ns) associada(s) com sucesso.${notFoundCount > 0 ? `\n⚠️ ${notFoundCount} arquivo(s) não correspondem a nenhum código externo cadastrado.` : ''}`);
     setBulkUploading(false);
     e.target.value = '';
+    fetchProducts();
   };
 
   const onDragOver = (e, id) => {
