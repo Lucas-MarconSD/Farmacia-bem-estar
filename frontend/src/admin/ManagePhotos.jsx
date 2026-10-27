@@ -677,7 +677,7 @@ export default function ManagePhotos() {
                       style={{ cursor: 'pointer', width: 17, height: 17, accentColor: '#185942' }}
                     />
                   </td>
-                  <td>{p.external_id || p.id}</td>
+                  <td>{p.external_id && !/e\+/i.test(p.external_id) ? p.external_id : p.id}</td>
                   <td>
                     {p.image_url ? (
                       <img src={p.image_url} alt={p.name} style={{width: 40, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid #e5e7eb'}} />

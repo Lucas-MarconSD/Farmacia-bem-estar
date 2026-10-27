@@ -132,15 +132,26 @@ export default function ImportData() {
       ['descri', 'prod', 'nome']
     );
 
-    let barcode = findVal(
-      ['codigodebarras', 'codbarras', 'barcode', 'ean', 'gtin', 'cbarras'],
-      ['barras', 'ean', 'gtin']
-    );
+    const cleanCode = (val) => {
+      if (!val) return '';
+      let str = val.toString().trim();
+      return str.replace(/\.0+$/, '').replace(/,0+$/, '').trim();
+    };
 
-    let externalId = findVal(
+    let barcode = cleanCode(findVal(
+      ['codigodebarras', 'codbarras', 'barcode', 'ean', 'gtin', 'cbarras', 'eangtin'],
+      ['barras', 'ean', 'gtin']
+    ));
+
+    let externalId = cleanCode(findVal(
       ['codigoproduto', 'codproduto', 'idproduto', 'externalid', 'referencia', 'codigo', 'cod'],
       ['cod', 'ref']
-    );
+    ));
+
+    // Se a coluna de barras veio vazia mas a de código tem formato típico de EAN
+    if (!barcode && externalId && /^[0-9]{7,14}$/.test(externalId)) {
+      barcode = externalId;
+    }
 
     const priceStr = findVal(
       ['precovenda', 'prvenda', 'valordevenda', 'valorunitario', 'precoconsumidor', 'vlrunitario', 'vlrvenda', 'preco', 'valor', 'price'],
@@ -184,10 +195,11 @@ export default function ImportData() {
       const nameMap = new Map();
 
       existingProducts.forEach(p => {
-        if (p.barcode && p.barcode.toString().trim()) {
+        // NUNCA indexa por códigos corrompidos com E+
+        if (p.barcode && p.barcode.toString().trim() && !/e\+/i.test(p.barcode)) {
           barcodeMap.set(p.barcode.toString().trim(), p);
         }
-        if (p.external_id && p.external_id.toString().trim()) {
+        if (p.external_id && p.external_id.toString().trim() && !/e\+/i.test(p.external_id)) {
           extIdMap.set(p.external_id.toString().trim(), p);
         }
         if (p.name && p.name.trim()) {
@@ -336,7 +348,8 @@ export default function ImportData() {
             price: price || (prevUpdate ? prevUpdate.price : existing.price),
             stock: updatedStock,
             active: true,
-            ...(barcode && !existing.barcode ? { barcode } : {}),
+            ...(barcode && !/e\+/i.test(barcode) ? { barcode } : {}),
+            ...(externalId && !/e\+/i.test(externalId) ? { external_id: externalId } : (/e\+/i.test(existing.external_id) ? { external_id: null } : {})),
             _originalExisting: prevUpdate ? prevUpdate._originalExisting : {
               id: existing.id,
               name: existing.name,

@@ -679,7 +679,7 @@ export default function Dashboard() {
                     style={{ cursor: 'pointer', width: 17, height: 17, accentColor: '#185942' }}
                   />
                 </td>
-                <td>{p.external_id || p.id}</td>
+                <td>{p.external_id && !/e\+/i.test(p.external_id) ? p.external_id : p.id}</td>
                 <td>
                   {p.image_url ? (
                     <img src={p.image_url} alt={p.name} className="product-img-mini" />
@@ -689,7 +689,9 @@ export default function Dashboard() {
                 </td>
                 <td>
                   <strong>{p.name}</strong>
-                  <div style={{fontSize: '0.75rem', color: '#6b7280'}}>EAN: {p.barcode || '-'}</div>
+                  <div style={{fontSize: '0.75rem', color: '#6b7280'}}>
+                    EAN: {p.barcode && !/e\+/i.test(p.barcode) ? p.barcode : '-'}
+                  </div>
                 </td>
                 <td>{p.categoryName || 'Sem categoria'}</td>
                 <td>R$ {formatCurrency(p.price)}</td>
